@@ -3,9 +3,9 @@
 
 const TELEGRAM_TOKEN = "8815005406:AAGwSBf--WvbEMCeQ1AusqJGQaXn1oxO0y4";
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
-const GROQ_API_KEY = ""; // Inserisci la tua chiave Groq per i vocali (gratis su console.groq.com)
+const GROQ_API_KEY = ""; // Opzionale per i vocali gratuiti (console.groq.com)
 
-// Stato in-memory dell'asta
+// Stato in-memory dell'asta con le 10 squadre predefinite dal file Excel
 let auctionState = {
   teams: {
     "Noi": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
@@ -39,7 +39,6 @@ async function getDatabase() {
   return null;
 }
 
-// Normalizzazione testo per match
 function normalize(str) {
   if (!str) return "";
   return str.toLowerCase().replace(/[\-_/\\.,:']/g, ' ').replace(/\s+/g, ' ').trim();
@@ -49,17 +48,14 @@ function findBestPlayer(query, allPlayers) {
   const q = normalize(query);
   if (!q) return null;
   
-  // 1. Match esatto
   let exact = allPlayers.find(p => normalize(p.nome) === q);
   if (exact) return exact;
 
-  // 2. Match contiene
   let starts = allPlayers.filter(p => normalize(p.nome).startsWith(q));
   if (starts.length === 1) return starts[0];
 
   let contains = allPlayers.filter(p => normalize(p.nome).includes(q));
   if (contains.length > 0) {
-    // Ordina per appetibilità/slot
     contains.sort((a, b) => (a.slot_10 - b.slot_10) || (b.ia_ordinamento - a.ia_ordinamento));
     return contains[0];
   }
@@ -111,21 +107,20 @@ async function handleTelegramMessage(msg, env) {
   text = text.trim();
   const lower = text.toLowerCase();
 
-  // COMANDI PRINCIPALI
+  // COMANDI MENU
   if (lower === "/start" || lower === "/help" || lower === "menu") {
     await sendMainMenu(chatId);
     return;
   }
 
-  
-    // GESTIONE SQUADRE: /squadre oppure squadre oppure /squadre Nome1, Nome2...
+  // 1. GESTIONE SQUADRE (LISTA O SETUP): /squadre oppure squadre oppure /squadre Nome1, Nome2...
   if (lower.startsWith("/squadre") || lower.startsWith("squadre")) {
     let cleanParam = text.replace(/^\/?squadre(@[a-zA-Z0-9_]+)?/i, "").trim();
     
     // Se non ha passato argomenti, mostra la lista attuale
     if (!cleanParam) {
-      const currentList = Object.keys(auctionState.teams).map((t, idx) => `${idx + 1}. <b>${t}</b> (${auctionState.teams[t].budget} cr)`).join("\n");
-      await sendMessage(chatId, `👥 <b>SQUADRE ATTUALI PARTECIPANTI (Lega a 10):</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${currentList}\n\n💡 <i>Per cambiare i nomi, scrivi:</i>\n<code>/squadre Noi, Peppe, Cece, Zio, Nero, Gino, Cugino, Paolo, Andrea, Chiap</code>`);
+      const currentList = Object.keys(auctionState.teams).map((t, idx) => `${idx + 1}. <b>${t}</b> (${auctionState.teams[t].budget} cr - ${auctionState.teams[t].players.length} giocatori)`).join("\n");
+      await sendMessage(chatId, `👥 <b>SQUADRE PARTECIPANTI (Lega a 10):</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${currentList}\n\n💡 <i>Per cambiare i nomi scrivi:</i>\n<code>/squadre Noi, Peppe, Cece, Zio, Nero, Gino, Cugino, Paolo, Andrea, Chiap</code>`);
       return;
     }
 
@@ -144,22 +139,93 @@ async function handleTelegramMessage(msg, env) {
     }
     
     const outList = Object.keys(auctionState.teams).map(t => `• <b>${t}</b>`).join("\n");
-    await sendMessage(chatId, `✅ <b>Impostate con successo ${Object.keys(auctionState.teams).length} Squadre (1000 crediti):</b>\n${outList}`);
+    await sendMessage(chatId, `✅ <b>Impostate ${Object.keys(auctionState.teams).length} Squadre (1000 crediti):</b>\n${outList}`);
     return;
   }
 
+  // 2. RESET ASTA
   if (lower === "/reset" || lower === "reset" || lower === "🔄 reset asta" || lower === "reset asta") {
     resetAuction();
-    await sendMessage(chatId, "🔄 <b>Asta Resettata!</b>\nTutte le 10 squadre sono state ripristinate a <b>1000 crediti</b> e le rose svuotate.");
+    await sendMessage(chatId, "🔄 <b>Asta Resettata!</b>\nTutte le 10 squadre sono state ripristinate a <b>1000 crediti</b> e tutti i 517 giocatori sono liberi.");
     return;
   }
 
+  // 3. ANNULLA
   if (lower === "/annulla" || lower === "annulla") {
     const res = undoLastAction();
     await sendMessage(chatId, res);
     return;
   }
 
+  // 4. CONSULTA LA MIA ROSA (/rosa)
+  if (lower === "/rosa" || lower === "rosa" || lower === "📋 la mia rosa") {
+    await sendMiaRosaStatus(chatId);
+    return;
+  }
+
+  // 5. CONSULTA SQUADRA SPECIFICA (/squadra <Nome> oppure squadra <Nome> oppure /rosa <Nome>)
+  if (lower.startsWith("/squadra") || lower.startsWith("squadra") || lower.startsWith("/rosa ") || (lower.startsWith("rosa ") && lower !== "rosa")) {
+    let qTeam = "";
+    if (lower.startsWith("/squadra") || lower.startsWith("squadra")) {
+      qTeam = text.replace(/^\/?squadra(@[a-zA-Z0-9_]+)?/i, "").trim();
+    } else {
+      qTeam = text.replace(/^\/?rosa(@[a-zA-Z0-9_]+)?/i, "").trim();
+    }
+
+    if (!qTeam) {
+      let msg = "👥 <b>DI QUALE SQUADRA VUOI VEDERE LA ROSA?</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+      Object.keys(auctionState.teams).forEach((t, i) => {
+        msg += `${i + 1}. <code>/squadra ${t}</code> (${auctionState.teams[t].budget} cr - ${auctionState.teams[t].players.length} acquistati)\n`;
+      });
+      await sendMessage(chatId, msg, getRepartoKeyboard());
+      return;
+    }
+
+    const targetKey = Object.keys(auctionState.teams).find(k => k.toLowerCase() === qTeam.toLowerCase() || k.toLowerCase().includes(qTeam.toLowerCase()));
+    if (!targetKey) {
+      await sendMessage(chatId, `❌ Squadra "<b>${qTeam}</b>" non trovata.\nSquadre disponibili:\n` + Object.keys(auctionState.teams).map(t => `• <code>/squadra ${t}</code>`).join("\n"));
+      return;
+    }
+
+    const tData = auctionState.teams[targetKey];
+    let lines = [
+      `📋 <b>ROSA: ${targetKey.toUpperCase()}</b>`,
+      `💰 <b>Crediti rimasti:</b> ${tData.budget} / 1000`,
+      `📦 <b>Giocatori acquistati (${tData.players.length}):</b> P: ${tData.role_count.P}/3 | D: ${tData.role_count.D}/8 | C: ${tData.role_count.C}/8 | A: ${tData.role_count.A}/6\n`
+    ];
+
+    if (tData.players.length === 0) {
+      lines.push("<i>Nessun giocatore acquistato finora.</i>");
+    } else {
+      const byRole = { P: [], D: [], C: [], A: [] };
+      tData.players.forEach(p => {
+        if (byRole[p.ruolo]) byRole[p.ruolo].push(p);
+        else byRole["A"].push(p);
+      });
+
+      if (byRole.P.length > 0) {
+        lines.push("🧤 <b>PORTIERI:</b>");
+        byRole.P.forEach(p => lines.push(`  • ${p.nome} (<b>${p.prezzo} cr</b>)`));
+      }
+      if (byRole.D.length > 0) {
+        lines.push("🛡️ <b>DIFENSORI:</b>");
+        byRole.D.forEach(p => lines.push(`  • ${p.nome} (<b>${p.prezzo} cr</b>)`));
+      }
+      if (byRole.C.length > 0) {
+        lines.push("🎯 <b>CENTROCAMPISTI:</b>");
+        byRole.C.forEach(p => lines.push(`  • ${p.nome} (<b>${p.prezzo} cr</b>)`));
+      }
+      if (byRole.A.length > 0) {
+        lines.push("⚽ <b>ATTACCANTI:</b>");
+        byRole.A.forEach(p => lines.push(`  • ${p.nome} (<b>${p.prezzo} cr</b>)`));
+      }
+    }
+
+    await sendMessage(chatId, lines.join("\n"), getRepartoKeyboard());
+    return;
+  }
+
+  // 6. BOTTONI RAPIDI DI REPARTO
   if (lower === "/att" || lower === "attaccanti" || lower === "⚽ attacco") {
     await sendAttaccoStatus(chatId, db);
     return;
@@ -190,78 +256,7 @@ async function handleTelegramMessage(msg, env) {
     return;
   }
 
-  if (lower === "/rosa" || lower === "rosa" || lower === "📋 la mia rosa") {
-    await sendMiaRosaStatus(chatId);
-    return;
-  }
-
-    // CONSULTA SQUADRA SPECIFICA: /squadra [NomeSquadra] oppure /rosa [NomeSquadra]
-  if (lower.startsWith("/squadra") || (lower.startsWith("/rosa ") || (lower.startsWith("rosa ") && lower !== "rosa"))) {
-    let qTeam = "";
-    if (lower.startsWith("/squadra")) {
-      qTeam = text.replace(/^\/?squadra(@[a-zA-Z0-9_]+)?/i, "").trim();
-    } else {
-      qTeam = text.replace(/^\/?rosa(@[a-zA-Z0-9_]+)?/i, "").trim();
-    }
-
-    if (!qTeam) {
-      // Mostra lista delle squadre consultabili
-      const listButtons = Object.keys(auctionState.teams).map(t => [{ text: `📋 Rosa ${t}`, callback_data: `squadra_${t}` }]);
-      let msg = "👥 <b>DI QUALE SQUADRA VUOI VEDERE LA ROSA?</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
-      Object.keys(auctionState.teams).forEach((t, i) => {
-        msg += `${i + 1}. <code>/squadra ${t}</code> (${auctionState.teams[t].budget} cr - ${auctionState.teams[t].players.length} giocatori)\n`;
-      });
-      await sendMessage(chatId, msg, getRepartoKeyboard());
-      return;
-    }
-
-    // Match case-insensitive squadra
-    const targetKey = Object.keys(auctionState.teams).find(k => k.toLowerCase() === qTeam.toLowerCase() || k.toLowerCase().includes(qTeam.toLowerCase()));
-    if (!targetKey) {
-      await sendMessage(chatId, `❌ Squadra "<b>${qTeam}</b>" non trovata.\nSquadre disponibili:\n` + Object.keys(auctionState.teams).map(t => `• <code>${t}</code>`).join("\n"));
-      return;
-    }
-
-    const tData = auctionState.teams[targetKey];
-    let lines = [
-      `📋 <b>ROSA: ${targetKey.toUpperCase()}</b>`,
-      `💰 <b>Crediti rimasti:</b> ${tData.budget} / 1000`,
-      `📦 <b>Giocatori acquistati (${tData.players.length}):</b> P: ${tData.role_count.P}/3 | D: ${tData.role_count.D}/8 | C: ${tData.role_count.C}/8 | A: ${tData.role_count.A}/6\n`
-    ];
-
-    if (tData.players.length === 0) {
-      lines.push("<i>Nessun giocatore acquistato finora.</i>");
-    } else {
-      // Raggruppa per ruolo P, D, C, A
-      const byRole = { P: [], D: [], C: [], A: [] };
-      tData.players.forEach(p => {
-        if (byRole[p.ruolo]) byRole[p.ruolo].push(p);
-        else byRole["A"].push(p);
-      });
-
-      if (byRole.P.length > 0) {
-        lines.push("🧤 <b>PORTIERI:</b>");
-        byRole.P.forEach(p => lines.push(`  • ${p.nome} (<b>${p.prezzo} cr</b>)`));
-      }
-      if (byRole.D.length > 0) {
-        lines.push("🛡️ <b>DIFENSORI:</b>");
-        byRole.D.forEach(p => lines.push(`  • ${p.nome} (<b>${p.prezzo} cr</b>)`));
-      }
-      if (byRole.C.length > 0) {
-        lines.push("🎯 <b>CENTROCAMPISTI:</b>");
-        byRole.C.forEach(p => lines.push(`  • ${p.nome} (<b>${p.prezzo} cr</b>)`));
-      }
-      if (byRole.A.length > 0) {
-        lines.push("⚽ <b>ATTACCANTI:</b>");
-        byRole.A.forEach(p => lines.push(`  • ${p.nome} (<b>${p.prezzo} cr</b>)`));
-      }
-    }
-
-    await sendMessage(chatId, lines.join("\n"), getRepartoKeyboard());
-    return;
-  }
-
-  // ASSEGNAZIONI: "mio <giocatore> <prezzo>"
+  // 7. ASSEGNAZIONI: "mio <giocatore> <prezzo>"
   if (lower.startsWith("mio ")) {
     const parts = text.substring(4).trim().split(" ");
     let price = 1;
@@ -276,12 +271,13 @@ async function handleTelegramMessage(msg, env) {
       await sendMessage(chatId, `❌ Giocatore "<b>${nameQuery}</b>" non trovato nel listone.`);
       return;
     }
-    const res = assignPlayer(player, "NOI", price);
+    const myTeamKey = auctionState.teams["Noi"] ? "Noi" : (auctionState.teams["NOI"] ? "NOI" : Object.keys(auctionState.teams)[0]);
+    const res = assignPlayer(player, myTeamKey, price);
     await sendMessage(chatId, res);
     return;
   }
 
-  // ASSEGNAZIONI: "via <giocatore> <prezzo> [squadra]"
+  // 8. ASSEGNAZIONI: "via <giocatore> <prezzo> [squadra]"
   if (lower.startsWith("via ")) {
     const raw = text.substring(4).trim();
     const parts = raw.split(" ");
@@ -306,12 +302,15 @@ async function handleTelegramMessage(msg, env) {
       await sendMessage(chatId, `❌ Giocatore "<b>${nameQuery}</b>" non trovato nel listone.`);
       return;
     }
-    const res = assignPlayer(player, teamName, price);
+
+    // Risoluzione nome squadra
+    const matchedTeam = Object.keys(auctionState.teams).find(k => k.toLowerCase() === teamName.toLowerCase() || k.toLowerCase().includes(teamName.toLowerCase())) || teamName;
+    const res = assignPlayer(player, matchedTeam, price);
     await sendMessage(chatId, res);
     return;
   }
 
-  // RICERCA GIOCATORE / FLASH RADAR
+  // 9. RICERCA GIOCATORE / FLASH RADAR
   await handlePlayerLookup(chatId, text, db);
 }
 
@@ -365,14 +364,20 @@ function undoLastAction() {
 function resetAuction() {
   auctionState = {
     teams: {
-      "NOI": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } }
+      "Noi": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+      "Peppe": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+      "Cece": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+      "Zio": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+      "Nero": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+      "Gino": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+      "Cugino": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+      "Paolo": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+      "Andrea": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+      "Chiap": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } }
     },
     assigned: {},
     history: []
   };
-  for (let i = 2; i <= 10; i++) {
-    auctionState.teams[`Squadra ${i}`] = { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
-  }
 }
 
 // -------------------------------------------------------------
@@ -380,7 +385,6 @@ function resetAuction() {
 // -------------------------------------------------------------
 async function sendAttaccoStatus(chatId, db) {
   const attAll = db.giocatori_per_reparto["ATTACCANTI"] || {};
-  
   function getFree(slotKey) {
     const list = attAll[slotKey] || [];
     return list.filter(p => !auctionState.assigned[p.nome]);
@@ -390,12 +394,11 @@ async function sendAttaccoStatus(chatId, db) {
   const s2 = getFree("SLOT_2");
   const s3 = getFree("SLOT_3");
 
-  // Calcolo avversari senza 1° slot d'attacco
   let teamsWithTop = 0;
   let opponentBudgetsNoTop = [];
 
   for (const [tName, tData] of Object.entries(auctionState.teams)) {
-    if (tName === "NOI") continue;
+    if (tName === "Noi" || tName === "NOI") continue;
     const hasTop = tData.players.some(p => p.ruolo === "A" && p.prezzo >= 150);
     if (hasTop || (tData.role_count.A >= 1 && tData.players.some(p => p.ruolo === "A"))) {
       teamsWithTop++;
@@ -405,7 +408,8 @@ async function sendAttaccoStatus(chatId, db) {
   }
 
   opponentBudgetsNoTop.sort((a, b) => b - a);
-  const myBudget = auctionState.teams["NOI"] ? auctionState.teams["NOI"].budget : 1000;
+  const myTeam = auctionState.teams["Noi"] || auctionState.teams["NOI"] || { budget: 1000 };
+  const myBudget = myTeam.budget;
 
   let advice = "";
   if (myBudget >= (opponentBudgetsNoTop[0] || 0)) {
@@ -482,7 +486,6 @@ async function sendPortieriStatus(chatId, db) {
 
 async function sendObiettiviStatus(chatId, db) {
   const ob = db.obiettivi || {};
-  
   function formatList(list) {
     if (!list || list.length === 0) return "<i>Nessuno</i>";
     return list.map(item => {
@@ -511,7 +514,7 @@ async function sendSaldiStatus(chatId) {
   list.sort((a, b) => b.budget - a.budget);
 
   list.forEach((t, i) => {
-    const isMe = t.name === "NOI" ? " 👑 (TU)" : "";
+    const isMe = (t.name === "Noi" || t.name === "NOI") ? " 👑 (TU)" : "";
     lines.push(`${i + 1}. <b>${t.name}</b>${isMe}: <b>${t.budget} cr</b> (${t.count} acquistati)`);
   });
 
@@ -519,9 +522,11 @@ async function sendSaldiStatus(chatId) {
 }
 
 async function sendMiaRosaStatus(chatId) {
-  const me = auctionState.teams["NOI"] || { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
+  const meKey = auctionState.teams["Noi"] ? "Noi" : (auctionState.teams["NOI"] ? "NOI" : Object.keys(auctionState.teams)[0]);
+  const me = auctionState.teams[meKey] || { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
+  
   let lines = [
-    `📋 <b>LA TUA ROSA (NOI)</b>`,
+    `📋 <b>LA TUA ROSA (${meKey.toUpperCase()})</b>`,
     `💰 <b>Crediti rimasti:</b> ${me.budget} / 1000`,
     `📦 <b>Composizione:</b> P: ${me.role_count.P}/3 | D: ${me.role_count.D}/8 | C: ${me.role_count.C}/8 | A: ${me.role_count.A}/6\n`,
     `<b>Giocatori acquistati:</b>`
@@ -531,7 +536,7 @@ async function sendMiaRosaStatus(chatId) {
     lines.push("<i>Nessun giocatore acquistato finora.</i>");
   } else {
     me.players.forEach((p, idx) => {
-      lines.push(`${idx + 1}. [${p.ruolo}] <b>${p.nome}</b> ➔ ${p.prezzo} cr`);
+      lines.push(`${idx + 1}. [${p.ruolo}] <b>${p.nome}</b> ➔ <b>${p.prezzo} cr</b>`);
     });
   }
 
@@ -597,21 +602,9 @@ async function handlePlayerLookup(chatId, text, db) {
               evalStr +
               statusAssigned;
 
-  const inlineKeys = {
-    inline_keyboard: [
-      [
-        { text: `✅ Mio a ${askedPrice || 1}`, callback_data: `mio_${p.nome}_${askedPrice || 1}` },
-        { text: `❌ Via a ${askedPrice || 1}`, callback_data: `via_${p.nome}_${askedPrice || 1}` }
-      ]
-    ]
-  };
-
-  await sendMessage(chatId, out, inlineKeys);
+  await sendMessage(chatId, out, getRepartoKeyboard());
 }
 
-// -------------------------------------------------------------
-// TRASCRIZIONE VOCALE (Whisper via Groq / OpenAI)
-// -------------------------------------------------------------
 async function transcribeTelegramVoice(fileId, env) {
   try {
     const fileRes = await fetch(`${TELEGRAM_API}/getFile?file_id=${fileId}`);
@@ -651,17 +644,15 @@ async function transcribeTelegramVoice(fileId, env) {
   return null;
 }
 
-// -------------------------------------------------------------
-// TELEGRAM API HELPERS
-// -------------------------------------------------------------
 async function sendMainMenu(chatId) {
   const text = `⚽ <b>FantaLive Tactical Bot</b>\n` +
                `Il tuo assistente strategico per l'asta a 10 (1000 crediti).\n\n` +
-               `<b>Cosa puoi fare:</b>\n` +
-               `• 🔍 <b>Cerca Giocatore:</b> Scrivi il nome (es. <i>kean</i> o <i>kean 140</i>).\n` +
-               `• ⚡ <b>Assegna:</b> Scrivi <code>mio kean 140</code> oppure <code>via lautaro 320 marco</code>.\n` +
-               `• 🎙️ <b>Vocale:</b> Dici a voce <i>"Lautaro a Marco per 320"</i>.\n` +
-               `• ↩️ <b>Annulla:</b> Usa <code>/annulla</code> se hai sbagliato un inserimento.`;
+               `<b>Comandi Rapidi:</b>\n` +
+               `• 🔍 <b>Cerca:</b> Scrivi il nome (es. <i>kean</i> o <i>kean 140</i>).\n` +
+               `• ⚡ <b>Assegna:</b> <code>mio kean 140</code> oppure <code>via lautaro 320 peppe</code>.\n` +
+               `• 👥 <b>Squadre:</b> <code>/squadre</code> o <code>/squadra Peppe</code>.\n` +
+               `• 🎙️ <b>Vocale:</b> Dici a voce <i>"Lautaro a Peppe per 320"</i>.\n` +
+               `• ↩️ <b>Annulla:</b> <code>/annulla</code>.`;
 
   await sendMessage(chatId, text, getRepartoKeyboard());
 }
