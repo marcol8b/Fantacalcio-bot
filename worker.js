@@ -322,41 +322,179 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
 
+    
+    function getPlayerTacticalDossier(player) {
+      if (!appState || !player) return '';
+
+      const meKey = appState.teams["Noi"] ? "Noi" : (appState.teams["NOI"] ? "NOI" : Object.keys(appState.teams)[0]);
+      const me = appState.teams[meKey] || { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
+      const myBudget = me.budget;
+      const maxRole = (player.ruolo === "P" ? 3 : (player.ruolo === "D" || player.ruolo === "C" ? 8 : 6));
+      const myRoleMissing = Math.max(0, maxRole - (me.role_count[player.ruolo] || 0));
+
+      let aboveMeNoTop = [];
+      let belowMeNoTop = [];
+      let completedRole = [];
+      let alreadyHaveTop = [];
+
+      for (const [tName, tData] of Object.entries(appState.teams)) {
+        if (tName === meKey) continue;
+        
+        let topThreshold = 130;
+        if (player.ruolo === "C") topThreshold = 50;
+        if (player.ruolo === "D") topThreshold = 35;
+        if (player.ruolo === "P") topThreshold = 40;
+
+        const hasTop = tData.players.some(x => x.ruolo === player.ruolo && x.prezzo >= topThreshold);
+        const roleCount = tData.role_count[player.ruolo] || 0;
+        const roleMissing = Math.max(0, maxRole - roleCount);
+
+        const otherMissing = Math.max(0, 3 - (tData.role_count.P || 0)) + 
+                             Math.max(0, 8 - (tData.role_count.D || 0)) + 
+                             Math.max(0, 8 - (tData.role_count.C || 0)) + 
+                             Math.max(0, 6 - (tData.role_count.A || 0)) - 1;
+        const maxBid = Math.max(1, tData.budget - Math.max(0, otherMissing));
+
+        const teamObj = {
+          name: tName,
+          budget: tData.budget,
+          maxBid: maxBid,
+          hasTop: hasTop,
+          roleCount: roleCount,
+          roleMissing: roleMissing,
+          diff: tData.budget - myBudget
+        };
+
+        if (roleMissing === 0) {
+          completedRole.push(teamObj);
+        } else if (hasTop) {
+          alreadyHaveTop.push(teamObj);
+        } else if (tData.budget > myBudget) {
+          aboveMeNoTop.push(teamObj);
+        } else {
+          belowMeNoTop.push(teamObj);
+        }
+      }
+
+      aboveMeNoTop.sort((a, b) => b.budget - a.budget);
+      belowMeNoTop.sort((a, b) => b.budget - a.budget);
+
+      let estimatedMin = 1;
+      let estimatedMax = 5;
+      if (player.ruolo === "A") {
+        if (player.slot_10 === 1) { estimatedMin = 280; estimatedMax = 380; }
+        else if (player.slot_10 === 2) { estimatedMin = 140; estimatedMax = 230; }
+        else if (player.slot_10 === 3) { estimatedMin = 60; estimatedMax = 120; }
+        else { estimatedMin = 10; estimatedMax = 40; }
+      } else if (player.ruolo === "C") {
+        if (player.slot_10 === 1) { estimatedMin = 90; estimatedMax = 140; }
+        else if (player.slot_10 === 2) { estimatedMin = 45; estimatedMax = 80; }
+        else if (player.slot_10 === 3) { estimatedMin = 15; estimatedMax = 40; }
+        else { estimatedMin = 2; estimatedMax = 12; }
+      } else if (player.ruolo === "D") {
+        if (player.slot_10 === 1) { estimatedMin = 40; estimatedMax = 70; }
+        else if (player.slot_10 === 2) { estimatedMin = 15; estimatedMax = 35; }
+        else { estimatedMin = 1; estimatedMax = 10; }
+      } else if (player.ruolo === "P") {
+        if (player.slot_10 === 1) { estimatedMin = 60; estimatedMax = 90; }
+        else { estimatedMin = 10; estimatedMax = 40; }
+      }
+
+      let html = `
+        <div class="space-y-2.5">
+          <div class="flex items-center justify-between bg-dark-800 p-2 rounded-lg border border-dark-700">
+            <span class="text-gray-400 font-semibold">💸 A quanto potrebbe andare:</span>
+            <span class="text-amber-400 font-bold text-sm">~${estimatedMin} - ${estimatedMax} cr</span>
+          </div>
+
+          <div class="space-y-1 bg-dark-800 p-2.5 rounded-lg border border-dark-700">
+            <span class="font-bold text-gray-300 block mb-1">👥 QUADRO CONTENDENTI PER IL RUOLO [${player.ruolo}]:</span>
+      `;
+
+      if (aboveMeNoTop.length > 0) {
+        html += `<div class="text-red-400 font-semibold text-[11px] mb-1">🔴 SOPRA DI TE CON SLOT LIBERI (${aboveMeNoTop.length} squadre):</div>`;
+        html += `<div class="space-y-1 pl-1">` + aboveMeNoTop.map((t, idx) => `
+          <div class="flex justify-between items-center text-[11px] bg-dark-900/60 px-2 py-1 rounded">
+            <span class="font-bold text-white">${idx+1}. ${t.name}</span>
+            <span class="text-gray-300"><b>${t.budget} cr</b> (<span class="text-red-400 font-semibold">+${t.diff} cr</span> vs te | Slot ${player.ruolo}: ${t.roleCount}/${maxRole})</span>
+          </div>
+        `).join('') + `</div>`;
+      } else {
+        html += `<div class="text-emerald-400 font-semibold text-[11px] bg-emerald-950/30 p-1.5 rounded border border-emerald-500/20">👑 SEI AL 1° POSTO! Nessun avversario a caccia di [${player.ruolo}] ha più crediti di te (${myBudget} cr).</div>`;
+      }
+
+      if (belowMeNoTop.length > 0) {
+        html += `<div class="text-amber-400 font-semibold text-[11px] mt-2 mb-1">🟡 SOTTO DI TE CON SLOT LIBERI (${belowMeNoTop.length} squadre):</div>`;
+        html += `<div class="space-y-1 pl-1 max-h-24 overflow-y-auto">` + belowMeNoTop.map(t => `
+          <div class="flex justify-between items-center text-[11px] bg-dark-900/40 px-2 py-0.5 rounded">
+            <span class="text-gray-300">• ${t.name}</span>
+            <span class="text-gray-400">${t.budget} cr (Max: <b>${t.maxBid} cr</b>)</span>
+          </div>
+        `).join('') + `</div>`;
+      }
+
+      html += `</div>`;
+
+      let targetName = "";
+      let reasonText = "";
+
+      if (aboveMeNoTop.length > 0) {
+        const richest = aboveMeNoTop[0];
+        targetName = richest.name + " (" + richest.budget + " cr)";
+        reasonText = `Ha <b>più crediti di te (+${richest.diff} cr)</b> e ha ancora bisogno di [${player.ruolo}]. Se il tuo obiettivo primario non è ${player.nome}, fallo spendere rilanciando fino a ~${Math.floor(estimatedMin * 0.85)} cr per prosciugargli i crediti!`;
+      } else if (belowMeNoTop.length > 0) {
+        const topBelow = belowMeNoTop[0];
+        targetName = topBelow.name + " (" + topBelow.budget + " cr)";
+        reasonText = `È il tuo inseguitore più vicino per questo ruolo. Fallo spendere per togliergli spazio di manovra!`;
+      }
+
+      if (targetName) {
+        html += `
+          <div class="bg-gradient-to-r from-red-950/40 to-amber-950/40 border border-red-500/30 p-2.5 rounded-lg text-[11px] space-y-1">
+            <div class="flex items-center gap-1.5 text-amber-400 font-bold">
+              <i class="fa-solid fa-wand-magic-sparkles"></i> 🃏 TRAPPOLA / BLUFF STRATEGICO:
+            </div>
+            <div>🎯 <b>Bersaglio da prosciugare:</b> <span class="text-white font-bold">${targetName}</span></div>
+            <div class="text-gray-300 leading-relaxed">💡 <b>Perché:</b> ${reasonText}</div>
+          </div>
+        `;
+      }
+
+      html += `</div>`;
+      return html;
+    }
+
+
     function renderDashboard() {
       if (!appState) return;
 
-      const me = appState.teams["Noi"] || { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
+      const meKey = appState.teams["Noi"] ? "Noi" : (appState.teams["NOI"] ? "NOI" : Object.keys(appState.teams)[0]);
+      const me = appState.teams[meKey] || { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
       
-      // 1. Hero Stats
       document.getElementById('myBudgetDisplay').innerText = me.budget;
       const myTotalSlots = (me.role_count.P||0) + (me.role_count.D||0) + (me.role_count.C||0) + (me.role_count.A||0);
-      document.getElementById('mySlotCountDisplay').innerText = \`\${myTotalSlots} / 25\`;
-      document.getElementById('myRoleBadges').innerHTML = \`
-        <span class="bg-dark-700 px-1.5 py-0.5 rounded">P: \${me.role_count.P||0}/3</span>
-        <span class="bg-dark-700 px-1.5 py-0.5 rounded">D: \${me.role_count.D||0}/8</span>
-        <span class="bg-dark-700 px-1.5 py-0.5 rounded">C: \${me.role_count.C||0}/8</span>
-        <span class="bg-dark-700 px-1.5 py-0.5 rounded">A: \${me.role_count.A||0}/6</span>
-      \`;
+      document.getElementById('mySlotCountDisplay').innerText = `${myTotalSlots} / 25`;
+      document.getElementById('myRoleBadges').innerHTML = `
+        <span class="bg-dark-700 px-1.5 py-0.5 rounded">P: ${me.role_count.P||0}/3</span>
+        <span class="bg-dark-700 px-1.5 py-0.5 rounded">D: ${me.role_count.D||0}/8</span>
+        <span class="bg-dark-700 px-1.5 py-0.5 rounded">C: ${me.role_count.C||0}/8</span>
+        <span class="bg-dark-700 px-1.5 py-0.5 rounded">A: ${me.role_count.A||0}/6</span>
+      `;
 
       const missingSlots = Math.max(1, 25 - myTotalSlots);
-      document.getElementById('myAvgPerSlotDisplay').innerText = \`~\${Math.floor(me.budget / missingSlots)} cr\`;
+      document.getElementById('myAvgPerSlotDisplay').innerText = `~${Math.floor(me.budget / missingSlots)} cr`;
 
-      // Hero Attacco Stat
-      const freeS1Att = (appState.scarcity.A.SLOT_1 || []).filter(p => !appState.assigned[p.nome]);
-      document.getElementById('topAttRemainingDisplay').innerText = \`Slot 1: \${freeS1Att.length} rimasti\`;
-      const oppsNoTop = Object.entries(appState.teams).filter(([n, d]) => n !== 'Noi' && !d.players.some(p => p.ruolo === 'A' && p.prezzo >= 130));
-      document.getElementById('topAttOppsCount').innerText = \`\${oppsNoTop.length} avversari senza top\`;
+      const attReparto = appState.scarcity["ATTACCANTI"] || appState.scarcity["A"] || {};
+      const freeS1Att = (attReparto["SLOT_1"] || []).filter(p => !appState.assigned[p.nome]);
+      document.getElementById('topAttRemainingDisplay').innerText = `Slot 1: ${freeS1Att.length} rimasti`;
+      
+      const oppsNoTop = Object.entries(appState.teams).filter(([n, d]) => n !== meKey && !d.players.some(p => p.ruolo === 'A' && p.prezzo >= 130));
+      document.getElementById('topAttOppsCount').innerText = `${oppsNoTop.length} avversari senza top`;
 
-      // Hero Tactical Text
-      document.getElementById('tacticalHeroText').innerHTML = appState.tacticalAdviceHtml || "Seleziona un calciatore o verifica i reparti per i consigli in tempo reale.";
+      document.getElementById('tacticalHeroText').innerHTML = appState.tacticalAdviceHtml || "Caricamento consigli tattici completato.";
 
-      // 2. Render Teams Ledger
       renderTeamsLedger();
-
-      // 3. Render Scarcity Matrix
       renderScarcityMatrix();
-
-      // 4. Render Targets
       renderTargetsList();
     }
 
@@ -366,7 +504,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       teams.sort((a, b) => b.budget - a.budget);
 
       container.innerHTML = teams.map((t, idx) => {
-        const isMe = t.name === 'Noi';
+        const isMe = (t.name === 'Noi' || t.name === 'NOI');
         const aCount = t.role_count.A || 0;
         const cCount = t.role_count.C || 0;
         const dCount = t.role_count.D || 0;
@@ -376,231 +514,188 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         const maxBidA = Math.max(1, t.budget - otherMissing);
 
         const hasTopAtt = t.players.some(p => p.ruolo === 'A' && p.prezzo >= 130);
-        const topBadge = hasTopAtt ? \`<span class="text-xs text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">✅ Ha Top</span>\` : \`<span class="text-xs text-red-400 bg-red-500/10 px-2 py-0.5 rounded">❌ Senza Top</span>\`;
+        const topBadge = hasTopAtt ? `<span class="text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded font-bold">✅ Ha Top</span>` : `<span class="text-[10px] text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded font-bold">❌ Senza Top</span>`;
 
-        return \`
-          <div class="bg-dark-800 border \${isMe ? 'border-emerald-500/50 bg-emerald-950/10' : 'border-dark-700'} p-3 rounded-xl hover:border-dark-600 transition space-y-1.5 shadow-md">
+        return `
+          <div class="bg-dark-800 border ${isMe ? 'border-emerald-500/50 bg-emerald-950/10' : 'border-dark-700'} p-3 rounded-xl hover:border-dark-600 transition space-y-2 shadow-md">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
-                <span class="text-xs font-bold \${idx < 3 ? 'text-amber-400' : 'text-gray-500'}">#\${idx+1}</span>
-                <span class="font-bold text-sm text-white">\${t.name} \${isMe ? '👑 (TU)' : ''}</span>
-              </div>
-              <div class="text-right">
-                <span class="text-sm font-extrabold \${isMe ? 'text-emerald-400' : 'text-cyan-400'}">\${t.budget} cr</span>
-              </div>
-            </div>
-            <div class="flex items-center justify-between text-xs text-gray-400 pt-1 border-t border-dark-700/60">
-              <div class="flex gap-1.5">
-                <span>P:\${pCount}/3</span>
-                <span>D:\${dCount}/8</span>
-                <span>C:\${cCount}/8</span>
-                <span>A:\${aCount}/6</span>
+                <span class="text-xs font-bold ${idx < 3 ? 'text-amber-400' : 'text-gray-500'}">#${idx+1}</span>
+                <span class="font-bold text-sm text-white">${t.name} ${isMe ? '👑 (TU)' : ''}</span>
               </div>
               <div class="flex items-center gap-2">
-                \${topBadge}
-                <span class="font-semibold text-gray-300">Max Bid: <b class="text-amber-400">\${maxBidA}cr</b></span>
+                <span class="text-sm font-extrabold ${isMe ? 'text-emerald-400' : 'text-cyan-400'}">${t.budget} cr</span>
+                <button onclick="openTeamRosterModal('${t.name}')" class="bg-dark-700 hover:bg-dark-600 text-gray-300 hover:text-white text-[10px] font-semibold px-2 py-1 rounded-lg transition flex items-center gap-1 border border-dark-600">
+                  <i class="fa-solid fa-list-check"></i> Rosa
+                </button>
+              </div>
+            </div>
+            <div class="flex items-center justify-between text-xs text-gray-400 pt-1.5 border-t border-dark-700/60">
+              <div class="flex gap-1.5 font-medium">
+                <span class="${pCount===3?'text-emerald-400':''}">P:${pCount}/3</span>
+                <span class="${dCount===8?'text-emerald-400':''}">D:${dCount}/8</span>
+                <span class="${cCount===8?'text-emerald-400':''}">C:${cCount}/8</span>
+                <span class="${aCount===6?'text-emerald-400':''}">A:${aCount}/6</span>
+              </div>
+              <div class="flex items-center gap-2">
+                ${topBadge}
+                <span class="text-gray-300 font-semibold">Max Bid A: <b class="text-amber-400">${maxBidA}cr</b></span>
               </div>
             </div>
           </div>
-        \`;
+        `;
       }).join('');
-    }
-
-    function switchScarcityTab(role) {
-      currentScarcityTab = role;
-      ['ATT', 'CC', 'DIF', 'POR'].forEach(r => {
-        const btn = document.getElementById(\`tab_\${r}\`);
-        if (r === role) {
-          btn.className = "flex-1 py-1.5 rounded-lg bg-dark-700 text-white transition";
-        } else {
-          btn.className = "flex-1 py-1.5 rounded-lg text-gray-400 hover:text-white transition";
-        }
-      });
-      renderScarcityMatrix();
     }
 
     function renderScarcityMatrix() {
       const container = document.getElementById('scarcitySlotContainer');
-      const roleCode = currentScarcityTab === 'ATT' ? 'A' : (currentScarcityTab === 'CC' ? 'C' : (currentScarcityTab === 'DIF' ? 'D' : 'P'));
-      const slots = appState.scarcity[roleCode] || {};
+      const repartiMap = { 'ATT': 'ATTACCANTI', 'CC': 'CENTROCAMPISTI', 'DIF': 'DIFENSORI', 'POR': 'PORTIERI' };
+      const roleRepartoKey = repartiMap[currentScarcityTab] || 'ATTACCANTI';
+      const slots = appState.scarcity[roleRepartoKey] || {};
 
       let html = '';
       for (let s = 1; s <= 4; s++) {
-        const slotKey = \`SLOT_\${s}\`;
+        const slotKey = `SLOT_${s}`;
         const players = slots[slotKey] || [];
         if (players.length === 0) continue;
 
         const freePlayers = players.filter(p => !appState.assigned[p.nome]);
         const slotTitle = s === 1 ? '🔴 SLOT 1 (Super Top)' : (s === 2 ? '🟠 SLOT 2 (Top / 15+ gol)' : (s === 3 ? '🟡 SLOT 3 (Titolari)' : '⚪ SLOT 4 (Scommesse)'));
 
-        html += \`
-          <div class="bg-dark-800 border border-dark-700 rounded-xl p-3 space-y-2">
+        html += `
+          <div class="bg-dark-800 border border-dark-700 rounded-xl p-3 space-y-2 shadow-sm">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-gray-300 uppercase">\${slotTitle}</span>
-              <span class="text-xs font-semibold px-2 py-0.5 rounded bg-dark-700 text-emerald-400">\${freePlayers.length} / \${players.length} liberi</span>
+              <span class="text-xs font-bold text-gray-200 uppercase">${slotTitle}</span>
+              <span class="text-xs font-semibold px-2 py-0.5 rounded bg-dark-700 text-emerald-400">${freePlayers.length} / ${players.length} liberi</span>
             </div>
             <div class="grid grid-cols-2 gap-1.5">
-              \${players.map(p => {
+              ${players.map(p => {
                 const isTaken = appState.assigned[p.nome];
-                return \`
-                  <button onclick="openPlayerModal('\${p.nome}')" class="text-left p-2 rounded-lg border text-xs transition flex flex-col justify-between \${isTaken ? 'bg-dark-900/60 border-dark-800 opacity-40' : 'bg-dark-700/50 hover:bg-dark-700 border-dark-600/60 hover:border-brand-500'}">
+                return `
+                  <button onclick="openPlayerModal('${p.nome}')" class="text-left p-2 rounded-lg border text-xs transition flex flex-col justify-between ${isTaken ? 'bg-dark-900/60 border-dark-800 opacity-40' : 'bg-dark-700/50 hover:bg-dark-700 border-dark-600/60 hover:border-brand-500'}">
                     <div class="flex justify-between items-start">
-                      <span class="font-bold text-white truncate">\${p.nome}</span>
-                      <span class="text-[10px] text-gray-400">\${p.squadra}</span>
+                      <span class="font-bold text-white truncate">${p.nome}</span>
+                      <span class="text-[10px] text-gray-400">${p.squadra}</span>
                     </div>
-                    <div class="flex justify-between items-center mt-1 text-[10px]">
-                      <span class="text-gray-400">IA: \${p.ia_ordinamento} • Tit: \${p.titolarita}/5</span>
-                      \${isTaken ? \`<span class="text-red-400 font-bold">\${isTaken.price}cr</span>\` : (p.budget_target ? \`<span class="text-emerald-400 font-semibold">\${p.budget_target}cr</span>\` : '')}
+                    <div class="flex justify-between items-center mt-1.5 text-[10px]">
+                      <span class="text-gray-400">IA: ${p.ia_ordinamento} • Tit: ${p.titolarita}/5</span>
+                      ${isTaken ? `<span class="text-red-400 font-bold">${isTaken.team} (${isTaken.price}cr)</span>` : (p.budget_target ? `<span class="text-emerald-400 font-semibold">${p.budget_target}cr</span>` : '<span class="text-gray-500">Libero</span>')}
                     </div>
                   </button>
-                \`;
+                `;
               }).join('')}
             </div>
           </div>
-        \`;
+        `;
       }
       container.innerHTML = html || '<p class="text-xs text-gray-500 text-center py-6">Nessun calciatore disponibile.</p>';
     }
 
-    function filterTargets(role) {
-      currentTargetFilter = role;
-      ['ALL', 'P', 'D', 'C', 'A'].forEach(r => {
-        const btn = document.getElementById(\`tgt_\${r}\`);
-        if (r === role) {
-          btn.className = "px-2.5 py-1 rounded-lg bg-dark-700 text-white";
-        } else {
-          btn.className = "px-2.5 py-1 rounded-lg text-gray-400 hover:text-white";
-        }
-      });
-      renderTargetsList();
-    }
-
-    function renderTargetsList() {
-      const container = document.getElementById('targetListContainer');
-      const cats = [
-        { key: 'GIALLO_MUST_HAVE', label: 'MUST HAVE', icon: '🟡', border: 'neon-border-gold' },
-        { key: 'ROSA_PRIMO_SLOT_MUST_HAVE', label: '1° SLOT MUST HAVE', icon: '🌸', border: 'neon-border-pink' },
-        { key: 'BLU_OTTIMO_TITOLARE', label: 'OTTIMI TITOLARI', icon: '🔵', border: 'neon-border-blue' },
-        { key: 'GRIGIO_SCOMMESSINA', label: 'SCOMMESSINE', icon: '⚪', border: 'neon-border-gray' }
-      ];
-
-      let html = '';
-      cats.forEach(cat => {
-        let players = appState.targets[cat.key] || [];
-        if (currentTargetFilter !== 'ALL') {
-          players = players.filter(p => p.ruolo === currentTargetFilter);
-        }
-        if (players.length === 0) return;
-
-        html += \`
-          <div class="bg-dark-800 border border-dark-700 rounded-xl p-3 \${cat.border} space-y-2">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-gray-200">\${cat.icon} \${cat.label}</span>
-              <span class="text-xs text-gray-500">\${players.length} calciatori</span>
-            </div>
-            <div class="space-y-1">
-              \${players.map(p => {
-                const isTaken = appState.assigned[p.nome];
-                let statusBadge = '';
-                if (!isTaken) statusBadge = \`<span class="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">LIBERO</span>\`;
-                else if (isTaken.team === 'Noi') statusBadge = \`<span class="text-[10px] font-bold text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded">TUO (\${isTaken.price}cr)</span>\`;
-                else statusBadge = \`<span class="text-[10px] text-gray-500 line-through">\${isTaken.team} (\${isTaken.price}cr)</span>\`;
-
-                return \`
-                  <div onclick="openPlayerModal('\${p.nome}')" class="cursor-pointer hover:bg-dark-700/60 p-1.5 rounded-lg flex items-center justify-between text-xs transition">
-                    <div class="flex items-center gap-2">
-                      <span class="font-bold text-white \${isTaken ? 'line-through text-gray-500' : ''}">\${p.nome}</span>
-                      <span class="text-[10px] text-gray-400">(\${p.squadra} • \${p.ruolo})</span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      \${p.budget_target ? \`<span class="text-xs font-semibold text-amber-400">\${p.budget_target}cr</span>\` : ''}
-                      \${statusBadge}
-                    </div>
-                  </div>
-                \`;
-              }).join('')}
-            </div>
-          </div>
-        \`;
-      });
-
-      container.innerHTML = html || '<p class="text-xs text-gray-500 text-center py-6">Nessun obiettivo per questo filtro.</p>';
-    }
-
-    // Modal & Assign Flow
     function openPlayerModal(playerName) {
       selectedPlayer = appState.allPlayers.find(p => p.nome.toLowerCase() === playerName.toLowerCase());
       if (!selectedPlayer) return;
 
       const isTaken = appState.assigned[selectedPlayer.nome];
-      document.getElementById('modalPlayerHeader').innerHTML = \`
-        <div class="flex justify-between items-start">
-          <div>
-            <h3 class="text-lg font-bold text-white">\${selectedPlayer.nome}</h3>
-            <p class="text-xs text-gray-400">\${selectedPlayer.squadra} • \${selectedPlayer.ruolo} • Slot \${selectedPlayer.slot_10} (IA: \${selectedPlayer.ia_ordinamento})</p>
-          </div>
-          \${isTaken ? \`<span class="text-xs bg-red-500/20 text-red-400 px-2.5 py-1 rounded-lg font-bold">Assegnato a \${isTaken.team} (\${isTaken.price}cr)</span>\` : \`<span class="text-xs bg-emerald-500/20 text-emerald-400 px-2.5 py-1 rounded-lg font-bold">🟢 LIBERO</span>\`}
-        </div>
-        \${selectedPlayer.nota ? \`<p class="text-xs text-gray-300 italic mt-2 bg-dark-900 p-2 rounded-lg border border-dark-700">📝 \${selectedPlayer.nota}</p>\` : ''}
-      \`;
+      let badgeHtml = '';
+      if (selectedPlayer.tag_obiettivo === 'GIALLO_MUST_HAVE') badgeHtml = '<span class="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded font-bold">🟡 MUST HAVE</span>';
+      if (selectedPlayer.tag_obiettivo === 'ROSA_PRIMO_SLOT_MUST_HAVE') badgeHtml = '<span class="text-xs bg-pink-500/20 text-pink-400 px-2 py-0.5 rounded font-bold">🌸 1° SLOT MUST HAVE</span>';
+      if (selectedPlayer.tag_obiettivo === 'BLU_OTTIMO_TITOLARE') badgeHtml = '<span class="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded font-bold">🔵 OTTIMO TITOLARE</span>';
+      if (selectedPlayer.tag_obiettivo === 'GRIGIO_SCOMMESSINA') badgeHtml = '<span class="text-xs bg-gray-500/20 text-gray-300 px-2 py-0.5 rounded font-bold">⚪ SCOMMESSINA</span>';
 
-      // Set suggested price
+      document.getElementById('modalPlayerHeader').innerHTML = `
+        <div class="flex justify-between items-start gap-2">
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 class="text-lg font-bold text-white">${selectedPlayer.nome}</h3>
+              ${badgeHtml}
+            </div>
+            <p class="text-xs text-gray-400 mt-0.5">${selectedPlayer.squadra} • Ruolo: <b>${selectedPlayer.ruolo}</b> • Slot 10: <b>SLOT ${selectedPlayer.slot_10}</b> (Appetibilità IA: ${selectedPlayer.ia_ordinamento}) • Titolarità: ${selectedPlayer.titolarita}/5</p>
+          </div>
+          ${isTaken ? `<span class="text-xs bg-red-500/20 text-red-400 px-2.5 py-1 rounded-lg font-bold shrink-0">Assegnato a ${isTaken.team} (${isTaken.price}cr)</span>` : `<span class="text-xs bg-emerald-500/20 text-emerald-400 px-2.5 py-1 rounded-lg font-bold shrink-0">🟢 LIBERO</span>`}
+        </div>
+        ${selectedPlayer.budget_target ? `<div class="text-xs text-emerald-400 font-semibold mt-1">🎯 Tuo Budget Target da Excel: <b>${selectedPlayer.budget_target} cr</b></div>` : ''}
+        ${selectedPlayer.nota ? `<p class="text-xs text-gray-300 italic mt-2 bg-dark-900 p-2.5 rounded-lg border border-dark-700">📝 <b>Nota Tattica:</b> ${selectedPlayer.nota}</p>` : ''}
+      `;
+
       document.getElementById('assignPriceInput').value = selectedPlayer.budget_target || (selectedPlayer.slot_10 === 1 ? 250 : (selectedPlayer.slot_10 === 2 ? 140 : 20));
 
-      // Insights & Bluff
-      document.getElementById('modalTacticalInsights').innerHTML = \`
-        <div class="font-semibold text-emerald-400 flex items-center gap-1.5"><i class="fa-solid fa-chart-line"></i> Intelligence Tattica:</div>
-        <p class="text-gray-300">Stima d'asta realistica: <b>\${selectedPlayer.slot_10 === 1 ? '280-380' : '140-230'} cr</b>.</p>
-        <p class="text-gray-400">💡 <i>Usa i tasti rapidi qui sotto per assegnare in 1 click a Noi o a un avversario.</i></p>
-      \`;
+      document.getElementById('modalTacticalInsights').innerHTML = getPlayerTacticalDossier(selectedPlayer);
 
-      // Team Buttons
       const teamBtnContainer = document.getElementById('modalTeamButtons');
       const teams = Object.keys(appState.teams);
-      teamBtnContainer.innerHTML = teams.map(tName => \`
-        <button onclick="selectTeamForAssign('\${tName}')" id="btnTeam_\${tName}" class="team-assign-btn text-xs py-1.5 px-2 rounded-lg border border-dark-600 bg-dark-800 hover:bg-dark-700 text-gray-200 truncate \${tName==='Noi'?'border-emerald-500 text-emerald-400 font-bold':''}">
-          \${tName}
+      teamBtnContainer.innerHTML = teams.map(tName => `
+        <button onclick="selectTeamForAssign('${tName}')" id="btnTeam_${tName}" class="team-assign-btn text-xs py-1.5 px-2 rounded-lg border border-dark-600 bg-dark-800 hover:bg-dark-700 text-gray-200 truncate ${tName==='Noi'?'bg-emerald-600 text-white border-emerald-400 font-bold':''}">
+          ${tName}
         </button>
-      \`).join('');
+      `).join('');
 
       selectedTeamToAssign = "Noi";
+      document.querySelector('#assignModal .space-y-3.pt-2').classList.remove('hidden');
       document.getElementById('assignModal').classList.remove('hidden');
     }
 
-    let selectedTeamToAssign = "Noi";
-    function selectTeamForAssign(tName) {
-      selectedTeamToAssign = tName;
-      document.querySelectorAll('.team-assign-btn').forEach(b => {
-        b.classList.remove('bg-emerald-600', 'text-white', 'border-emerald-400');
+    function openTeamRosterModal(teamName) {
+      const tData = appState.teams[teamName];
+      if (!tData) return;
+
+      const isMe = (teamName === 'Noi' || teamName === 'NOI');
+      const byRole = { P: [], D: [], C: [], A: [] };
+      tData.players.forEach(p => {
+        if (byRole[p.ruolo]) byRole[p.ruolo].push(p);
+        else byRole["A"].push(p);
       });
-      const target = document.getElementById(\`btnTeam_\${tName}\`);
-      if (target) {
-        target.classList.add('bg-emerald-600', 'text-white', 'border-emerald-400');
+
+      function renderRoleSection(list) {
+        if (!list || list.length === 0) return `<div class="text-xs text-gray-500 py-1"><i>Nessun giocatore acquistato</i></div>`;
+        return list.map(p => `
+          <div class="flex justify-between items-center text-xs bg-dark-900/60 px-2.5 py-1.5 rounded-lg border border-dark-700/50">
+            <span class="font-bold text-white">${p.nome}</span>
+            <span class="text-emerald-400 font-extrabold">${p.prezzo} cr</span>
+          </div>
+        `).join('');
       }
+
+      document.getElementById('modalPlayerHeader').innerHTML = `
+        <div class="flex justify-between items-start">
+          <div>
+            <h3 class="text-lg font-bold text-white flex items-center gap-2">📋 ROSA: ${teamName.toUpperCase()} ${isMe ? '👑 (TU)' : ''}</h3>
+            <p class="text-xs text-gray-400 mt-1">Crediti Residui: <b class="text-emerald-400 text-sm">${tData.budget} cr</b> / 1000 • Giocatori: <b>${tData.players.length}/25</b></p>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('modalTacticalInsights').innerHTML = `
+        <div class="space-y-3 max-h-96 overflow-y-auto pr-1">
+          <div>
+            <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider block mb-1.5">🧤 Portieri (${byRole.P.length}/3)</span>
+            <div class="space-y-1">${renderRoleSection(byRole.P)}</div>
+          </div>
+          <div>
+            <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider block mb-1.5">🛡️ Difensori (${byRole.D.length}/8)</span>
+            <div class="space-y-1">${renderRoleSection(byRole.D)}</div>
+          </div>
+          <div>
+            <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider block mb-1.5">🎯 Centrocampisti (${byRole.C.length}/8)</span>
+            <div class="space-y-1">${renderRoleSection(byRole.C)}</div>
+          </div>
+          <div>
+            <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider block mb-1.5">⚽ Attaccanti (${byRole.A.length}/6)</span>
+            <div class="space-y-1">${renderRoleSection(byRole.A)}</div>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('modalTeamButtons').innerHTML = '';
+      document.querySelector('#assignModal .space-y-3.pt-2').classList.add('hidden');
+      document.getElementById('assignModal').classList.remove('hidden');
     }
 
-    function adjustPrice(delta) {
-      const inp = document.getElementById('assignPriceInput');
-      inp.value = Math.max(1, parseInt(inp.value || 1) + delta);
+    function closeModal() {
+      document.getElementById('assignModal').classList.add('hidden');
+      document.querySelector('#assignModal .space-y-3.pt-2').classList.remove('hidden');
     }
 
-    async function confirmAssign() {
-      if (!selectedPlayer) return;
-      const price = parseInt(document.getElementById('assignPriceInput').value || 1);
-      try {
-        const res = await fetch('/api/action', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'assign',
-            player: selectedPlayer.nome,
-            team: selectedTeamToAssign,
-            price: price
-          })
-        });
-        if (res.ok) {
-          closeModal();
-          await fetchState();
+fetchState();
         }
       } catch (e) {
         console.error(e);
