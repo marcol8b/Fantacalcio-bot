@@ -379,40 +379,40 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         else { estimatedMin = 10; estimatedMax = 40; }
       }
 
-      let res = `
+      let res = ` + "`" + `
         <div class="space-y-2.5">
           <div class="flex items-center justify-between bg-dark-800 p-2 rounded-lg border border-dark-700">
             <span class="text-gray-400 font-semibold">💸 A quanto potrebbe andare:</span>
-            <span class="text-amber-400 font-bold text-sm">~${estimatedMin} - ${estimatedMax} cr</span>
+            <span class="text-amber-400 font-bold text-sm">~\${estimatedMin} - \${estimatedMax} cr</span>
           </div>
 
           <div class="space-y-1 bg-dark-800 p-2.5 rounded-lg border border-dark-700">
-            <span class="font-bold text-gray-300 block mb-1">👥 QUADRO CONTENDENTI PER IL RUOLO [${player.ruolo}]:</span>
-      `;
+            <span class="font-bold text-gray-300 block mb-1">👥 QUADRO CONTENDENTI PER IL RUOLO [\${player.ruolo}]:</span>
+      ` + "`" + `;
 
       if (aboveMeNoTop.length > 0) {
-        res += `<div class="text-red-400 font-semibold text-[11px] mb-1">🔴 SOPRA DI TE CON SLOT LIBERI (${aboveMeNoTop.length} squadre):</div>`;
-        res += `<div class="space-y-1 pl-1">` + aboveMeNoTop.map((t, idx) => `
+        res += ` + "`" + `<div class="text-red-400 font-semibold text-[11px] mb-1">🔴 SOPRA DI TE CON SLOT LIBERI (\${aboveMeNoTop.length} squadre):</div>` + "`" + `;
+        res += ` + "`" + `<div class="space-y-1 pl-1">` + "`" + ` + aboveMeNoTop.map((t, idx) => ` + "`" + `
           <div class="flex justify-between items-center text-[11px] bg-dark-900/60 px-2 py-1 rounded">
-            <span class="font-bold text-white">${idx+1}. ${t.name}</span>
-            <span class="text-gray-300"><b>${t.budget} cr</b> (<span class="text-red-400 font-semibold">+${t.diff} cr</span> vs te | Slot ${player.ruolo}: ${t.roleCount}/${maxRole})</span>
+            <span class="font-bold text-white">\${idx+1}. \${t.name}</span>
+            <span class="text-gray-300"><b>\${t.budget} cr</b> (<span class="text-red-400 font-semibold">+\${t.diff} cr</span> vs te | Slot \${player.ruolo}: \${t.roleCount}/\${maxRole})</span>
           </div>
-        `).join('') + `</div>`;
+        ` + "`" + `).join('') + ` + "`" + `</div>` + "`" + `;
       } else {
-        res += `<div class="text-emerald-400 font-semibold text-[11px] bg-emerald-950/30 p-1.5 rounded border border-emerald-500/20">👑 SEI AL 1° POSTO! Nessun avversario a caccia di [${player.ruolo}] ha più crediti di te (${myBudget} cr).</div>`;
+        res += ` + "`" + `<div class="text-emerald-400 font-semibold text-[11px] bg-emerald-950/30 p-1.5 rounded border border-emerald-500/20">👑 SEI AL 1° POSTO! Nessun avversario a caccia di [\${player.ruolo}] ha più crediti di te (\${myBudget} cr).</div>` + "`" + `;
       }
 
       if (belowMeNoTop.length > 0) {
-        res += `<div class="text-amber-400 font-semibold text-[11px] mt-2 mb-1">🟡 SOTTO DI TE CON SLOT LIBERI (${belowMeNoTop.length} squadre):</div>`;
-        res += `<div class="space-y-1 pl-1 max-h-24 overflow-y-auto">` + belowMeNoTop.map(t => `
+        res += ` + "`" + `<div class="text-amber-400 font-semibold text-[11px] mt-2 mb-1">🟡 SOTTO DI TE CON SLOT LIBERI (\${belowMeNoTop.length} squadre):</div>` + "`" + `;
+        res += ` + "`" + `<div class="space-y-1 pl-1 max-h-24 overflow-y-auto">` + "`" + ` + belowMeNoTop.map(t => ` + "`" + `
           <div class="flex justify-between items-center text-[11px] bg-dark-900/40 px-2 py-0.5 rounded">
-            <span class="text-gray-300">• ${t.name}</span>
-            <span class="text-gray-400">${t.budget} cr (Max: <b>${t.maxBid} cr</b>)</span>
+            <span class="text-gray-300">• \${t.name}</span>
+            <span class="text-gray-400">\${t.budget} cr (Max: <b>\${t.maxBid} cr</b>)</span>
           </div>
-        `).join('') + `</div>`;
+        ` + "`" + `).join('') + ` + "`" + `</div>` + "`" + `;
       }
 
-      res += `</div>`;
+      res += ` + "`" + `</div>` + "`" + `;
 
       let targetName = "";
       let reasonText = "";
@@ -427,18 +427,18 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       }
 
       if (targetName) {
-        res += `
+        res += ` + "`" + `
           <div class="bg-gradient-to-r from-red-950/40 to-amber-950/40 border border-red-500/30 p-2.5 rounded-lg text-[11px] space-y-1">
             <div class="flex items-center gap-1.5 text-amber-400 font-bold">
               <i class="fa-solid fa-wand-magic-sparkles"></i> 🃏 TRAPPOLA / BLUFF STRATEGICO:
             </div>
-            <div>🎯 <b>Bersaglio da prosciugare:</b> <span class="text-white font-bold">${targetName}</span></div>
-            <div class="text-gray-300 leading-relaxed">💡 <b>Perché:</b> ${reasonText}</div>
+            <div>🎯 <b>Bersaglio da prosciugare:</b> <span class="text-white font-bold">\${targetName}</span></div>
+            <div class="text-gray-300 leading-relaxed">💡 <b>Perché:</b> \${reasonText}</div>
           </div>
-        `;
+        ` + "`" + `;
       }
 
-      res += `</div>`;
+      res += ` + "`" + `</div>` + "`" + `;
       return res;
     }
 
@@ -454,44 +454,44 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       });
 
       function renderRoleSection(list) {
-        if (!list || list.length === 0) return `<div class="text-xs text-gray-500 py-1"><i>Nessun giocatore acquistato</i></div>`;
-        return list.map(p => `
+        if (!list || list.length === 0) return ` + "`" + `<div class="text-xs text-gray-500 py-1"><i>Nessun giocatore acquistato</i></div>` + "`" + `;
+        return list.map(p => ` + "`" + `
           <div class="flex justify-between items-center text-xs bg-dark-900/60 px-2.5 py-1.5 rounded-lg border border-dark-700/50">
-            <span class="font-bold text-white">${p.nome}</span>
-            <span class="text-emerald-400 font-extrabold">${p.prezzo} cr</span>
+            <span class="font-bold text-white">\${p.nome}</span>
+            <span class="text-emerald-400 font-extrabold">\${p.prezzo} cr</span>
           </div>
-        `).join('');
+        ` + "`" + `).join('');
       }
 
-      document.getElementById('modalPlayerHeader').innerHTML = `
+      document.getElementById('modalPlayerHeader').innerHTML = ` + "`" + `
         <div class="flex justify-between items-start">
           <div>
-            <h3 class="text-lg font-bold text-white flex items-center gap-2">📋 ROSA: ${teamName.toUpperCase()} ${isMe ? '👑 (TU)' : ''}</h3>
-            <p class="text-xs text-gray-400 mt-1">Crediti Residui: <b class="text-emerald-400 text-sm">${tData.budget} cr</b> / 1000 • Giocatori: <b>${tData.players.length}/25</b></p>
+            <h3 class="text-lg font-bold text-white flex items-center gap-2">📋 ROSA: \${teamName.toUpperCase()} \${isMe ? '👑 (TU)' : ''}</h3>
+            <p class="text-xs text-gray-400 mt-1">Crediti Residui: <b class="text-emerald-400 text-sm">\${tData.budget} cr</b> / 1000 • Giocatori: <b>\${tData.players.length}/25</b></p>
           </div>
         </div>
-      `;
+      ` + "`" + `;
 
-      document.getElementById('modalTacticalInsights').innerHTML = `
+      document.getElementById('modalTacticalInsights').innerHTML = ` + "`" + `
         <div class="space-y-3 max-h-96 overflow-y-auto pr-1">
           <div>
-            <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider block mb-1.5">🧤 Portieri (${byRole.P.length}/3)</span>
-            <div class="space-y-1">${renderRoleSection(byRole.P)}</div>
+            <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider block mb-1.5">🧤 Portieri (\${byRole.P.length}/3)</span>
+            <div class="space-y-1">\${renderRoleSection(byRole.P)}</div>
           </div>
           <div>
-            <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider block mb-1.5">🛡️ Difensori (${byRole.D.length}/8)</span>
-            <div class="space-y-1">${renderRoleSection(byRole.D)}</div>
+            <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider block mb-1.5">🛡️ Difensori (\${byRole.D.length}/8)</span>
+            <div class="space-y-1">\${renderRoleSection(byRole.D)}</div>
           </div>
           <div>
-            <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider block mb-1.5">🎯 Centrocampisti (${byRole.C.length}/8)</span>
-            <div class="space-y-1">${renderRoleSection(byRole.C)}</div>
+            <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider block mb-1.5">🎯 Centrocampisti (\${byRole.C.length}/8)</span>
+            <div class="space-y-1">\${renderRoleSection(byRole.C)}</div>
           </div>
           <div>
-            <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider block mb-1.5">⚽ Attaccanti (${byRole.A.length}/6)</span>
-            <div class="space-y-1">${renderRoleSection(byRole.A)}</div>
+            <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider block mb-1.5">⚽ Attaccanti (\${byRole.A.length}/6)</span>
+            <div class="space-y-1">\${renderRoleSection(byRole.A)}</div>
           </div>
         </div>
-      `;
+      ` + "`" + `;
 
       document.getElementById('modalTeamButtons').innerHTML = '';
       const formSec = document.querySelector('#assignModal .space-y-3.pt-2');
