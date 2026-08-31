@@ -222,7 +222,21 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           </h2>
           <span class="text-xs text-gray-500">Max Offerta Singola</span>
         </div>
-        <div id="teamsLedgerList" class="space-y-2 max-h-[700px] overflow-y-auto pr-1"></div>
+                <!-- Barra Selezione Rapida Squadre -->
+        <div class="flex flex-wrap gap-1 bg-dark-800 p-2 rounded-xl border border-dark-700 text-xs">
+          <span class="text-[11px] text-gray-400 w-full mb-1 font-semibold flex items-center gap-1"><i class="fa-solid fa-eye text-emerald-400"></i> Vedi Rosa Rapida:</span>
+          <button onclick="openTeamRosterModal('Noi')" class="bg-emerald-600/30 hover:bg-emerald-600 border border-emerald-500 text-emerald-300 text-[11px] px-2 py-0.5 rounded font-bold transition">Noi</button>
+          <button onclick="openTeamRosterModal('Peppe')" class="bg-dark-700 hover:bg-dark-600 text-gray-200 text-[11px] px-2 py-0.5 rounded transition">Peppe</button>
+          <button onclick="openTeamRosterModal('Cece')" class="bg-dark-700 hover:bg-dark-600 text-gray-200 text-[11px] px-2 py-0.5 rounded transition">Cece</button>
+          <button onclick="openTeamRosterModal('Zio')" class="bg-dark-700 hover:bg-dark-600 text-gray-200 text-[11px] px-2 py-0.5 rounded transition">Zio</button>
+          <button onclick="openTeamRosterModal('Nero')" class="bg-dark-700 hover:bg-dark-600 text-gray-200 text-[11px] px-2 py-0.5 rounded transition">Nero</button>
+          <button onclick="openTeamRosterModal('Gino')" class="bg-dark-700 hover:bg-dark-600 text-gray-200 text-[11px] px-2 py-0.5 rounded transition">Gino</button>
+          <button onclick="openTeamRosterModal('Cugino')" class="bg-dark-700 hover:bg-dark-600 text-gray-200 text-[11px] px-2 py-0.5 rounded transition">Cugino</button>
+          <button onclick="openTeamRosterModal('Paolo')" class="bg-dark-700 hover:bg-dark-600 text-gray-200 text-[11px] px-2 py-0.5 rounded transition">Paolo</button>
+          <button onclick="openTeamRosterModal('Andrea')" class="bg-dark-700 hover:bg-dark-600 text-gray-200 text-[11px] px-2 py-0.5 rounded transition">Andrea</button>
+          <button onclick="openTeamRosterModal('Chiap')" class="bg-dark-700 hover:bg-dark-600 text-gray-200 text-[11px] px-2 py-0.5 rounded transition">Chiap</button>
+        </div>
+        <div id="teamsLedgerList" class="space-y-2 max-h-[640px] overflow-y-auto pr-1"></div>
       </div>
 
       <!-- COLONNA 2: SCARSITÀ REPARTI (4 COLS) -->
@@ -310,6 +324,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     let currentTargetFilter = 'ALL';
     let selectedPlayer = null;
 
+
     function getPlayerTacticalDossier(player) {
       if (!appState || !player) return '';
 
@@ -320,6 +335,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
       let aboveMeNoTop = [];
       let belowMeNoTop = [];
+      let alreadyHaveTop = [];
+      let completedRole = [];
 
       for (const [tName, tData] of Object.entries(appState.teams)) {
         if (tName === meKey) continue;
@@ -349,14 +366,20 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           diff: tData.budget - myBudget
         };
 
-        if (roleMissing > 0) {
-          if (tData.budget > myBudget) aboveMeNoTop.push(teamObj);
-          else belowMeNoTop.push(teamObj);
+        if (roleMissing === 0) {
+          completedRole.push(teamObj);
+        } else if (hasTop) {
+          alreadyHaveTop.push(teamObj);
+        } else if (tData.budget > myBudget) {
+          aboveMeNoTop.push(teamObj);
+        } else {
+          belowMeNoTop.push(teamObj);
         }
       }
 
       aboveMeNoTop.sort((a, b) => b.budget - a.budget);
       belowMeNoTop.sort((a, b) => b.budget - a.budget);
+      alreadyHaveTop.sort((a, b) => b.budget - a.budget);
 
       let estimatedMin = 1;
       let estimatedMax = 5;
@@ -380,40 +403,49 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       }
 
       let res = ` + "`" + `
-        <div class="space-y-2.5">
-          <div class="flex items-center justify-between bg-dark-800 p-2 rounded-lg border border-dark-700">
-            <span class="text-gray-400 font-semibold">💸 A quanto potrebbe andare:</span>
-            <span class="text-amber-400 font-bold text-sm">~\${estimatedMin} - \${estimatedMax} cr</span>
+        <div class="space-y-3">
+          <!-- STIMA PREZZO -->
+          <div class="flex items-center justify-between bg-dark-800 p-3 rounded-xl border border-dark-700 shadow-sm">
+            <span class="text-gray-300 font-semibold text-xs flex items-center gap-1.5"><i class="fa-solid fa-tags text-emerald-400"></i> A quanto potrebbe andare:</span>
+            <span class="text-amber-400 font-extrabold text-sm bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20">~\${estimatedMin} - \${estimatedMax} cr</span>
           </div>
 
-          <div class="space-y-1 bg-dark-800 p-2.5 rounded-lg border border-dark-700">
-            <span class="font-bold text-gray-300 block mb-1">👥 QUADRO CONTENDENTI PER IL RUOLO [\${player.ruolo}]:</span>
+          <!-- QUADRO CONTENDENTI -->
+          <div class="space-y-2 bg-dark-800 p-3 rounded-xl border border-dark-700 shadow-sm">
+            <span class="font-bold text-gray-200 text-xs flex items-center gap-1.5 mb-1.5">
+              <i class="fa-solid fa-users-viewfinder text-cyan-400"></i> 👥 QUADRO CONTENDENTI PER IL RUOLO [\${player.ruolo}]:
+            </span>
       ` + "`" + `;
 
       if (aboveMeNoTop.length > 0) {
-        res += ` + "`" + `<div class="text-red-400 font-semibold text-[11px] mb-1">🔴 SOPRA DI TE CON SLOT LIBERI (\${aboveMeNoTop.length} squadre):</div>` + "`" + `;
+        res += ` + "`" + `<div class="text-red-400 font-bold text-xs mb-1 flex items-center gap-1">🔴 SOPRA DI TE CON SLOT LIBERI (\${aboveMeNoTop.length} squadre):</div>` + "`" + `;
         res += ` + "`" + `<div class="space-y-1 pl-1">` + "`" + ` + aboveMeNoTop.map((t, idx) => ` + "`" + `
-          <div class="flex justify-between items-center text-[11px] bg-dark-900/60 px-2 py-1 rounded">
+          <div class="flex justify-between items-center text-xs bg-dark-900/80 px-2.5 py-1.5 rounded-lg border border-red-500/20">
             <span class="font-bold text-white">\${idx+1}. \${t.name}</span>
-            <span class="text-gray-300"><b>\${t.budget} cr</b> (<span class="text-red-400 font-semibold">+\${t.diff} cr</span> vs te | Slot \${player.ruolo}: \${t.roleCount}/\${maxRole})</span>
+            <span class="text-gray-300"><b>\${t.budget} cr</b> (<span class="text-red-400 font-bold">+\${t.diff} cr</span> vs te | Slot \${player.ruolo}: \${t.roleCount}/\${maxRole})</span>
           </div>
         ` + "`" + `).join('') + ` + "`" + `</div>` + "`" + `;
       } else {
-        res += ` + "`" + `<div class="text-emerald-400 font-semibold text-[11px] bg-emerald-950/30 p-1.5 rounded border border-emerald-500/20">👑 SEI AL 1° POSTO! Nessun avversario a caccia di [\${player.ruolo}] ha più crediti di te (\${myBudget} cr).</div>` + "`" + `;
+        res += ` + "`" + `<div class="text-emerald-400 font-semibold text-xs bg-emerald-950/40 p-2 rounded-lg border border-emerald-500/30">👑 SEI AL 1° POSTO! Nessun avversario a caccia di [\${player.ruolo}] ha più crediti di te (\${myBudget} cr).</div>` + "`" + `;
       }
 
       if (belowMeNoTop.length > 0) {
-        res += ` + "`" + `<div class="text-amber-400 font-semibold text-[11px] mt-2 mb-1">🟡 SOTTO DI TE CON SLOT LIBERI (\${belowMeNoTop.length} squadre):</div>` + "`" + `;
-        res += ` + "`" + `<div class="space-y-1 pl-1 max-h-24 overflow-y-auto">` + "`" + ` + belowMeNoTop.map(t => ` + "`" + `
-          <div class="flex justify-between items-center text-[11px] bg-dark-900/40 px-2 py-0.5 rounded">
+        res += ` + "`" + `<div class="text-amber-400 font-bold text-xs mt-2.5 mb-1 flex items-center gap-1">🟡 SOTTO DI TE CON SLOT LIBERI (\${belowMeNoTop.length} squadre):</div>` + "`" + `;
+        res += ` + "`" + `<div class="space-y-1 pl-1 max-h-28 overflow-y-auto">` + "`" + ` + belowMeNoTop.map(t => ` + "`" + `
+          <div class="flex justify-between items-center text-xs bg-dark-900/50 px-2.5 py-1 rounded-lg">
             <span class="text-gray-300">• \${t.name}</span>
-            <span class="text-gray-400">\${t.budget} cr (Max: <b>\${t.maxBid} cr</b>)</span>
+            <span class="text-gray-400">\${t.budget} cr (Max: <b class="text-amber-400">\${t.maxBid} cr</b>)</span>
           </div>
         ` + "`" + `).join('') + ` + "`" + `</div>` + "`" + `;
+      }
+
+      if (alreadyHaveTop.length > 0) {
+        res += ` + "`" + `<div class="text-xs text-blue-400 mt-2 bg-blue-950/20 p-2 rounded-lg border border-blue-500/20">🔵 <b>Hanno già il Top:</b> ` + "`" + ` + alreadyHaveTop.map(t => t.name + ' (' + t.budget + 'cr)').join(', ') + ` + "`" + `</div>` + "`" + `;
       }
 
       res += ` + "`" + `</div>` + "`" + `;
 
+      // SEZIONE TRAPPOLA / BLUFF STRATEGICO CON BOX EVIDENZIATO
       let targetName = "";
       let reasonText = "";
       if (aboveMeNoTop.length > 0) {
@@ -428,12 +460,12 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
       if (targetName) {
         res += ` + "`" + `
-          <div class="bg-gradient-to-r from-red-950/40 to-amber-950/40 border border-red-500/30 p-2.5 rounded-lg text-[11px] space-y-1">
-            <div class="flex items-center gap-1.5 text-amber-400 font-bold">
-              <i class="fa-solid fa-wand-magic-sparkles"></i> 🃏 TRAPPOLA / BLUFF STRATEGICO:
+          <div class="bg-gradient-to-r from-red-950/60 via-dark-800 to-amber-950/60 border-2 border-amber-500/40 p-3.5 rounded-xl text-xs space-y-2 shadow-lg">
+            <div class="flex items-center gap-2 text-amber-400 font-extrabold text-sm">
+              <i class="fa-solid fa-wand-magic-sparkles text-amber-400 text-base"></i> 🃏 TRAPPOLA / BLUFF STRATEGICO:
             </div>
-            <div>🎯 <b>Bersaglio da prosciugare:</b> <span class="text-white font-bold">\${targetName}</span></div>
-            <div class="text-gray-300 leading-relaxed">💡 <b>Perché:</b> \${reasonText}</div>
+            <div class="text-gray-200">🎯 <b>Bersaglio da prosciugare:</b> <span class="text-white font-black text-sm bg-dark-900 px-2 py-0.5 rounded border border-dark-600">\${targetName}</span></div>
+            <div class="text-gray-300 leading-relaxed bg-dark-900/60 p-2.5 rounded-lg border border-dark-700">💡 <b>Perché:</b> \${reasonText}</div>
           </div>
         ` + "`" + `;
       }
@@ -441,6 +473,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       res += ` + "`" + `</div>` + "`" + `;
       return res;
     }
+
 
     function openTeamRosterModal(teamName) {
       const tData = appState.teams[teamName];
