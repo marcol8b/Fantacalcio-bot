@@ -1,73 +1,680 @@
-// ⚽ FantaLive Tactical Bot - Cloudflare Worker
-// Lega a 10 partecipanti, 1000 crediti
-
-const TELEGRAM_TOKEN = "8815005406:AAGwSBf--WvbEMCeQ1AusqJGQaXn1oxO0y4";
-const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
-const GROQ_API_KEY = ""; // Opzionale per i vocali gratuiti (console.groq.com)
-
-// Stato in-memory dell'asta con le 10 squadre predefinite dal file Excel
-let auctionState = {
-  teams: {
-    "Noi": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
-    "Peppe": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
-    "Cece": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
-    "Zio": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
-    "Nero": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
-    "Gino": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
-    "Cugino": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
-    "Paolo": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
-    "Andrea": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
-    "Chiap": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } }
-  },
-  assigned: {},
-  history: []
-};
-
-let databaseCache = null;
-
-async function getDatabase() {
-  if (databaseCache) return databaseCache;
-  try {
-    const res = await fetch("https://raw.githubusercontent.com/marcol8b/Fantacalcio-bot/main/fanta_database.json");
-    if (res.ok) {
-      databaseCache = await res.json();
-      return databaseCache;
+const DASHBOARD_HTML = `<!DOCTYPE html>
+<html lang="it" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>⚽ FantaLive Command Center</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 500: '#10b981', 600: '#059669' },
+            dark: { 900: '#0b0f19', 800: '#111827', 700: '#1f2937', 600: '#374151' },
+            gold: '#f59e0b',
+            fuchsia: '#d946ef',
+            cyan: '#06b6d4'
+          }
+        }
+      }
     }
-  } catch (e) {
-    console.error("Errore fetch database:", e);
-  }
-  return null;
-}
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    .neon-border-gold { border-left: 4px solid #f59e0b; }
+    .neon-border-pink { border-left: 4px solid #d946ef; }
+    .neon-border-blue { border-left: 4px solid #3b82f6; }
+    .neon-border-gray { border-left: 4px solid #9ca3af; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #111827; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+  </style>
+</head>
+<body class="bg-dark-900 text-gray-100 min-h-screen flex flex-col selection:bg-brand-500 selection:text-white">
 
-function normalize(str) {
-  if (!str) return "";
-  return str.toLowerCase().replace(/[\-_/\\.,:']/g, ' ').replace(/\s+/g, ' ').trim();
-}
+  <!-- TOP NAVBAR -->
+  <header class="bg-dark-800/90 backdrop-blur border-b border-dark-700 sticky top-0 z-40 px-4 py-3">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center space-x-3">
+        <span class="text-2xl">⚽</span>
+        <div>
+          <h1 class="text-lg font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">FANTALIVE COMMAND CENTER</h1>
+          <p class="text-xs text-gray-400">Lega a 10 • 1000 Crediti • Live Tactical Engine</p>
+        </div>
+      </div>
 
-function findBestPlayer(query, allPlayers) {
-  const q = normalize(query);
-  if (!q) return null;
-  
-  let exact = allPlayers.find(p => normalize(p.nome) === q);
-  if (exact) return exact;
+      <!-- SEARCH BAR -->
+      <div class="flex-1 max-w-md relative">
+        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+        <input type="text" id="searchInput" oninput="onSearchInput(this.value)" placeholder="Cerca calciatore (es: Kean, Vlahovic, Paz)..." 
+               class="w-full bg-dark-700 border border-dark-600 rounded-xl pl-9 pr-10 py-2 text-sm focus:outline-none focus:border-brand-500 text-white placeholder-gray-400">
+        <button onclick="startVoiceRecognition()" title="Cerca con la voce" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-emerald-400 p-1">
+          <i class="fa-solid fa-microphone"></i>
+        </button>
+        <!-- Search Results Dropdown -->
+        <div id="searchResults" class="hidden absolute top-full left-0 right-0 mt-1 bg-dark-800 border border-dark-600 rounded-xl shadow-2xl z-50 max-h-80 overflow-y-auto"></div>
+      </div>
 
-  let starts = allPlayers.filter(p => normalize(p.nome).startsWith(q));
-  if (starts.length === 1) return starts[0];
+      <!-- ACTION BUTTONS -->
+      <div class="flex items-center space-x-2">
+        <button onclick="triggerSimula()" class="bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-400 text-xs px-3 py-2 rounded-lg font-medium transition flex items-center gap-1.5">
+          <i class="fa-solid fa-play"></i> Simula Asta
+        </button>
+        <button onclick="triggerUndo()" class="bg-dark-700 hover:bg-dark-600 text-gray-300 text-xs px-3 py-2 rounded-lg font-medium transition flex items-center gap-1.5">
+          <i class="fa-solid fa-rotate-left"></i> Annulla
+        </button>
+        <button onclick="triggerReset()" class="bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 text-red-400 text-xs px-3 py-2 rounded-lg font-medium transition flex items-center gap-1.5">
+          <i class="fa-solid fa-arrows-rotate"></i> Reset
+        </button>
+      </div>
+    </div>
+  </header>
 
-  let contains = allPlayers.filter(p => normalize(p.nome).includes(q));
-  if (contains.length > 0) {
-    contains.sort((a, b) => (a.slot_10 - b.slot_10) || (b.ia_ordinamento - a.ia_ordinamento));
-    return contains[0];
-  }
-  return null;
-}
+  <!-- MAIN CONTAINER -->
+  <main class="max-w-7xl mx-auto w-full p-4 flex-1 space-y-4">
+
+    <!-- HERO CARDS (STATI & CONSIGLIO TATTICO) -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <!-- TUO BUDGET -->
+      <div class="bg-dark-800 border border-dark-700 p-4 rounded-2xl flex items-center justify-between shadow-lg">
+        <div>
+          <span class="text-xs text-gray-400 uppercase font-semibold tracking-wider">Tuo Budget (Noi)</span>
+          <div class="flex items-baseline gap-2 mt-1">
+            <span id="myBudgetDisplay" class="text-3xl font-extrabold text-emerald-400">1000</span>
+            <span class="text-xs text-gray-500">/ 1000 cr</span>
+          </div>
+          <p id="myRankDisplay" class="text-xs text-emerald-500/80 mt-1 font-medium">👑 #1° più ricco</p>
+        </div>
+        <div class="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 text-xl">
+          <i class="fa-solid fa-coins"></i>
+        </div>
+      </div>
+
+      <!-- COMPOSIZIONE ROSA -->
+      <div class="bg-dark-800 border border-dark-700 p-4 rounded-2xl flex items-center justify-between shadow-lg">
+        <div>
+          <span class="text-xs text-gray-400 uppercase font-semibold tracking-wider">Slot Occupati</span>
+          <div class="text-2xl font-bold text-white mt-1" id="mySlotCountDisplay">0 / 25</div>
+          <div class="flex gap-2 text-xs text-gray-400 mt-1" id="myRoleBadges">
+            <span class="bg-dark-700 px-1.5 py-0.5 rounded">P: 0/3</span>
+            <span class="bg-dark-700 px-1.5 py-0.5 rounded">D: 0/8</span>
+            <span class="bg-dark-700 px-1.5 py-0.5 rounded">C: 0/8</span>
+            <span class="bg-dark-700 px-1.5 py-0.5 rounded">A: 0/6</span>
+          </div>
+        </div>
+        <div class="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 text-xl">
+          <i class="fa-solid fa-shield-halved"></i>
+        </div>
+      </div>
+
+      <!-- MEDIA CREDITI PER SLOT MANCANTE -->
+      <div class="bg-dark-800 border border-dark-700 p-4 rounded-2xl flex items-center justify-between shadow-lg">
+        <div>
+          <span class="text-xs text-gray-400 uppercase font-semibold tracking-wider">Budget Medio / Slot</span>
+          <div class="text-2xl font-bold text-amber-400 mt-1" id="myAvgPerSlotDisplay">~40 cr</div>
+          <p class="text-xs text-gray-500 mt-1">per completare la rosa</p>
+        </div>
+        <div class="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 text-xl">
+          <i class="fa-solid fa-calculator"></i>
+        </div>
+      </div>
+
+      <!-- STATUS ATTACCO FLASH -->
+      <div class="bg-dark-800 border border-dark-700 p-4 rounded-2xl flex items-center justify-between shadow-lg">
+        <div>
+          <span class="text-xs text-gray-400 uppercase font-semibold tracking-wider">Top Attacco Rimasti</span>
+          <div class="text-2xl font-bold text-fuchsia-400 mt-1" id="topAttRemainingDisplay">Slot 1: 3 rimasti</div>
+          <p class="text-xs text-gray-400 mt-1" id="topAttOppsCount">10 squadre senza top</p>
+        </div>
+        <div class="w-12 h-12 rounded-xl bg-fuchsia-500/10 border border-fuchsia-500/20 flex items-center justify-center text-fuchsia-400 text-xl">
+          <i class="fa-solid fa-fire"></i>
+        </div>
+      </div>
+    </div>
+
+    <!-- TACTICAL ADVICE HERO BANNER -->
+    <div id="tacticalHeroBanner" class="bg-gradient-to-r from-emerald-950/40 via-dark-800 to-cyan-950/40 border border-emerald-500/20 rounded-2xl p-4 shadow-xl flex items-start gap-3">
+      <div class="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 text-lg mt-0.5">
+        <i class="fa-solid fa-brain"></i>
+      </div>
+      <div class="flex-1 text-sm text-gray-300" id="tacticalHeroText">
+        Caricamento intelligence tattica in corso...
+      </div>
+    </div>
+
+    <!-- 3 COLUMNS INTERACTIVE MATRIX -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+      
+      <!-- COLONNA 1: CLASSIFICA SQUADRE (4 COLS) -->
+      <div class="lg:col-span-4 space-y-3">
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-bold text-gray-300 uppercase tracking-wider flex items-center gap-2">
+            <i class="fa-solid fa-users text-emerald-400"></i> Squadre & Crediti (10)
+          </h2>
+          <span class="text-xs text-gray-500">Max Offerta Singola</span>
+        </div>
+        <div id="teamsLedgerList" class="space-y-2 max-h-[700px] overflow-y-auto pr-1"></div>
+      </div>
+
+      <!-- COLONNA 2: SCARSITÀ REPARTI (4 COLS) -->
+      <div class="lg:col-span-4 space-y-3">
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-bold text-gray-300 uppercase tracking-wider flex items-center gap-2">
+            <i class="fa-solid fa-layer-group text-cyan-400"></i> Radar Scarsità Reparti
+          </h2>
+        </div>
+
+        <!-- Role Tabs -->
+        <div class="flex rounded-xl bg-dark-800 p-1 border border-dark-700 text-xs font-semibold gap-1">
+          <button onclick="switchScarcityTab('ATT')" id="tab_ATT" class="flex-1 py-1.5 rounded-lg bg-dark-700 text-white transition">⚽ Attacco</button>
+          <button onclick="switchScarcityTab('CC')" id="tab_CC" class="flex-1 py-1.5 rounded-lg text-gray-400 hover:text-white transition">🎯 CC</button>
+          <button onclick="switchScarcityTab('DIF')" id="tab_DIF" class="flex-1 py-1.5 rounded-lg text-gray-400 hover:text-white transition">🛡️ Difesa</button>
+          <button onclick="switchScarcityTab('POR')" id="tab_POR" class="flex-1 py-1.5 rounded-lg text-gray-400 hover:text-white transition">🧤 Portieri</button>
+        </div>
+
+        <div id="scarcitySlotContainer" class="space-y-3 max-h-[640px] overflow-y-auto pr-1"></div>
+      </div>
+
+      <!-- COLONNA 3: I MIEI OBIETTIVI (4 COLS) -->
+      <div class="lg:col-span-4 space-y-3">
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-bold text-gray-300 uppercase tracking-wider flex items-center gap-2">
+            <i class="fa-solid fa-star text-gold"></i> I Tuoi Obiettivi
+          </h2>
+          <span class="text-xs text-gray-400" id="targetStatsBadge">72 calciatori</span>
+        </div>
+
+        <!-- Role Filter for Targets -->
+        <div class="flex rounded-xl bg-dark-800 p-1 border border-dark-700 text-xs font-medium gap-1">
+          <button onclick="filterTargets('ALL')" id="tgt_ALL" class="px-2.5 py-1 rounded-lg bg-dark-700 text-white">Tutti</button>
+          <button onclick="filterTargets('P')" id="tgt_P" class="px-2.5 py-1 rounded-lg text-gray-400 hover:text-white">🧤 Por</button>
+          <button onclick="filterTargets('D')" id="tgt_D" class="px-2.5 py-1 rounded-lg text-gray-400 hover:text-white">🛡️ Dif</button>
+          <button onclick="filterTargets('C')" id="tgt_C" class="px-2.5 py-1 rounded-lg text-gray-400 hover:text-white">🎯 CC</button>
+          <button onclick="filterTargets('A')" id="tgt_A" class="px-2.5 py-1 rounded-lg text-gray-400 hover:text-white">⚽ Att</button>
+        </div>
+
+        <div id="targetListContainer" class="space-y-3 max-h-[640px] overflow-y-auto pr-1"></div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- MODALE DETTAGLIO CALCIATORE & ASSEGNAZIONE RAPIDA -->
+  <div id="assignModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-dark-800 border border-dark-700 rounded-2xl max-w-lg w-full p-5 shadow-2xl relative space-y-4">
+      <button onclick="closeModal()" class="absolute top-4 right-4 text-gray-400 hover:text-white text-lg">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+
+      <div id="modalPlayerHeader"></div>
+
+      <!-- Tattica & Contendenti Flash -->
+      <div id="modalTacticalInsights" class="bg-dark-900/80 border border-dark-700 p-3.5 rounded-xl text-xs space-y-2"></div>
+
+      <!-- Form Assegnazione -->
+      <div class="space-y-3 pt-2 border-t border-dark-700">
+        <div class="flex items-center justify-between">
+          <label class="text-xs font-semibold text-gray-300">Prezzo d'Asta (cr):</label>
+          <div class="flex items-center gap-2">
+            <button onclick="adjustPrice(-5)" class="bg-dark-700 px-2 py-1 rounded text-xs hover:bg-dark-600">-5</button>
+            <input type="number" id="assignPriceInput" class="w-20 bg-dark-700 border border-dark-600 rounded-lg text-center font-bold text-emerald-400 py-1" value="1">
+            <button onclick="adjustPrice(5)" class="bg-dark-700 px-2 py-1 rounded text-xs hover:bg-dark-600">+5</button>
+          </div>
+        </div>
+
+        <div>
+          <label class="text-xs font-semibold text-gray-300 block mb-1.5">Assegna alla Squadra:</label>
+          <div id="modalTeamButtons" class="grid grid-cols-3 gap-1.5 max-h-36 overflow-y-auto p-1 bg-dark-900/50 rounded-xl border border-dark-700"></div>
+        </div>
+
+        <button onclick="confirmAssign()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30">
+          <i class="fa-solid fa-check"></i> Conferma Assegnazione
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- JAVASCRIPT LIVE ENGINE -->
+  <script>
+    let appState = null;
+    let currentScarcityTab = 'ATT';
+    let currentTargetFilter = 'ALL';
+    let selectedPlayer = null;
+
+    async function fetchState() {
+      try {
+        const res = await fetch('/api/state');
+        if (res.ok) {
+          appState = await res.json();
+          renderDashboard();
+        }
+      } catch (e) {
+        console.error("Errore fetch stato:", e);
+      }
+    }
+
+    function renderDashboard() {
+      if (!appState) return;
+
+      const me = appState.teams["Noi"] || { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
+      
+      // 1. Hero Stats
+      document.getElementById('myBudgetDisplay').innerText = me.budget;
+      const myTotalSlots = (me.role_count.P||0) + (me.role_count.D||0) + (me.role_count.C||0) + (me.role_count.A||0);
+      document.getElementById('mySlotCountDisplay').innerText = \`\${myTotalSlots} / 25\`;
+      document.getElementById('myRoleBadges').innerHTML = \`
+        <span class="bg-dark-700 px-1.5 py-0.5 rounded">P: \${me.role_count.P||0}/3</span>
+        <span class="bg-dark-700 px-1.5 py-0.5 rounded">D: \${me.role_count.D||0}/8</span>
+        <span class="bg-dark-700 px-1.5 py-0.5 rounded">C: \${me.role_count.C||0}/8</span>
+        <span class="bg-dark-700 px-1.5 py-0.5 rounded">A: \${me.role_count.A||0}/6</span>
+      \`;
+
+      const missingSlots = Math.max(1, 25 - myTotalSlots);
+      document.getElementById('myAvgPerSlotDisplay').innerText = \`~\${Math.floor(me.budget / missingSlots)} cr\`;
+
+      // Hero Attacco Stat
+      const freeS1Att = (appState.scarcity.A.SLOT_1 || []).filter(p => !appState.assigned[p.nome]);
+      document.getElementById('topAttRemainingDisplay').innerText = \`Slot 1: \${freeS1Att.length} rimasti\`;
+      const oppsNoTop = Object.entries(appState.teams).filter(([n, d]) => n !== 'Noi' && !d.players.some(p => p.ruolo === 'A' && p.prezzo >= 130));
+      document.getElementById('topAttOppsCount').innerText = \`\${oppsNoTop.length} avversari senza top\`;
+
+      // Hero Tactical Text
+      document.getElementById('tacticalHeroText').innerHTML = appState.tacticalAdviceHtml || "Seleziona un calciatore o verifica i reparti per i consigli in tempo reale.";
+
+      // 2. Render Teams Ledger
+      renderTeamsLedger();
+
+      // 3. Render Scarcity Matrix
+      renderScarcityMatrix();
+
+      // 4. Render Targets
+      renderTargetsList();
+    }
+
+    function renderTeamsLedger() {
+      const container = document.getElementById('teamsLedgerList');
+      const teams = Object.entries(appState.teams).map(([name, data]) => ({ name, ...data }));
+      teams.sort((a, b) => b.budget - a.budget);
+
+      container.innerHTML = teams.map((t, idx) => {
+        const isMe = t.name === 'Noi';
+        const aCount = t.role_count.A || 0;
+        const cCount = t.role_count.C || 0;
+        const dCount = t.role_count.D || 0;
+        const pCount = t.role_count.P || 0;
+
+        const otherMissing = Math.max(0, 3 - pCount) + Math.max(0, 8 - dCount) + Math.max(0, 8 - cCount) + Math.max(0, 6 - aCount - 1);
+        const maxBidA = Math.max(1, t.budget - otherMissing);
+
+        const hasTopAtt = t.players.some(p => p.ruolo === 'A' && p.prezzo >= 130);
+        const topBadge = hasTopAtt ? \`<span class="text-xs text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">✅ Ha Top</span>\` : \`<span class="text-xs text-red-400 bg-red-500/10 px-2 py-0.5 rounded">❌ Senza Top</span>\`;
+
+        return \`
+          <div class="bg-dark-800 border \${isMe ? 'border-emerald-500/50 bg-emerald-950/10' : 'border-dark-700'} p-3 rounded-xl hover:border-dark-600 transition space-y-1.5 shadow-md">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold \${idx < 3 ? 'text-amber-400' : 'text-gray-500'}">#\${idx+1}</span>
+                <span class="font-bold text-sm text-white">\${t.name} \${isMe ? '👑 (TU)' : ''}</span>
+              </div>
+              <div class="text-right">
+                <span class="text-sm font-extrabold \${isMe ? 'text-emerald-400' : 'text-cyan-400'}">\${t.budget} cr</span>
+              </div>
+            </div>
+            <div class="flex items-center justify-between text-xs text-gray-400 pt-1 border-t border-dark-700/60">
+              <div class="flex gap-1.5">
+                <span>P:\${pCount}/3</span>
+                <span>D:\${dCount}/8</span>
+                <span>C:\${cCount}/8</span>
+                <span>A:\${aCount}/6</span>
+              </div>
+              <div class="flex items-center gap-2">
+                \${topBadge}
+                <span class="font-semibold text-gray-300">Max Bid: <b class="text-amber-400">\${maxBidA}cr</b></span>
+              </div>
+            </div>
+          </div>
+        \`;
+      }).join('');
+    }
+
+    function switchScarcityTab(role) {
+      currentScarcityTab = role;
+      ['ATT', 'CC', 'DIF', 'POR'].forEach(r => {
+        const btn = document.getElementById(\`tab_\${r}\`);
+        if (r === role) {
+          btn.className = "flex-1 py-1.5 rounded-lg bg-dark-700 text-white transition";
+        } else {
+          btn.className = "flex-1 py-1.5 rounded-lg text-gray-400 hover:text-white transition";
+        }
+      });
+      renderScarcityMatrix();
+    }
+
+    function renderScarcityMatrix() {
+      const container = document.getElementById('scarcitySlotContainer');
+      const roleCode = currentScarcityTab === 'ATT' ? 'A' : (currentScarcityTab === 'CC' ? 'C' : (currentScarcityTab === 'DIF' ? 'D' : 'P'));
+      const slots = appState.scarcity[roleCode] || {};
+
+      let html = '';
+      for (let s = 1; s <= 4; s++) {
+        const slotKey = \`SLOT_\${s}\`;
+        const players = slots[slotKey] || [];
+        if (players.length === 0) continue;
+
+        const freePlayers = players.filter(p => !appState.assigned[p.nome]);
+        const slotTitle = s === 1 ? '🔴 SLOT 1 (Super Top)' : (s === 2 ? '🟠 SLOT 2 (Top / 15+ gol)' : (s === 3 ? '🟡 SLOT 3 (Titolari)' : '⚪ SLOT 4 (Scommesse)'));
+
+        html += \`
+          <div class="bg-dark-800 border border-dark-700 rounded-xl p-3 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-gray-300 uppercase">\${slotTitle}</span>
+              <span class="text-xs font-semibold px-2 py-0.5 rounded bg-dark-700 text-emerald-400">\${freePlayers.length} / \${players.length} liberi</span>
+            </div>
+            <div class="grid grid-cols-2 gap-1.5">
+              \${players.map(p => {
+                const isTaken = appState.assigned[p.nome];
+                return \`
+                  <button onclick="openPlayerModal('\${p.nome}')" class="text-left p-2 rounded-lg border text-xs transition flex flex-col justify-between \${isTaken ? 'bg-dark-900/60 border-dark-800 opacity-40' : 'bg-dark-700/50 hover:bg-dark-700 border-dark-600/60 hover:border-brand-500'}">
+                    <div class="flex justify-between items-start">
+                      <span class="font-bold text-white truncate">\${p.nome}</span>
+                      <span class="text-[10px] text-gray-400">\${p.squadra}</span>
+                    </div>
+                    <div class="flex justify-between items-center mt-1 text-[10px]">
+                      <span class="text-gray-400">IA: \${p.ia_ordinamento} • Tit: \${p.titolarita}/5</span>
+                      \${isTaken ? \`<span class="text-red-400 font-bold">\${isTaken.price}cr</span>\` : (p.budget_target ? \`<span class="text-emerald-400 font-semibold">\${p.budget_target}cr</span>\` : '')}
+                    </div>
+                  </button>
+                \`;
+              }).join('')}
+            </div>
+          </div>
+        \`;
+      }
+      container.innerHTML = html || '<p class="text-xs text-gray-500 text-center py-6">Nessun calciatore disponibile.</p>';
+    }
+
+    function filterTargets(role) {
+      currentTargetFilter = role;
+      ['ALL', 'P', 'D', 'C', 'A'].forEach(r => {
+        const btn = document.getElementById(\`tgt_\${r}\`);
+        if (r === role) {
+          btn.className = "px-2.5 py-1 rounded-lg bg-dark-700 text-white";
+        } else {
+          btn.className = "px-2.5 py-1 rounded-lg text-gray-400 hover:text-white";
+        }
+      });
+      renderTargetsList();
+    }
+
+    function renderTargetsList() {
+      const container = document.getElementById('targetListContainer');
+      const cats = [
+        { key: 'GIALLO_MUST_HAVE', label: 'MUST HAVE', icon: '🟡', border: 'neon-border-gold' },
+        { key: 'ROSA_PRIMO_SLOT_MUST_HAVE', label: '1° SLOT MUST HAVE', icon: '🌸', border: 'neon-border-pink' },
+        { key: 'BLU_OTTIMO_TITOLARE', label: 'OTTIMI TITOLARI', icon: '🔵', border: 'neon-border-blue' },
+        { key: 'GRIGIO_SCOMMESSINA', label: 'SCOMMESSINE', icon: '⚪', border: 'neon-border-gray' }
+      ];
+
+      let html = '';
+      cats.forEach(cat => {
+        let players = appState.targets[cat.key] || [];
+        if (currentTargetFilter !== 'ALL') {
+          players = players.filter(p => p.ruolo === currentTargetFilter);
+        }
+        if (players.length === 0) return;
+
+        html += \`
+          <div class="bg-dark-800 border border-dark-700 rounded-xl p-3 \${cat.border} space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-gray-200">\${cat.icon} \${cat.label}</span>
+              <span class="text-xs text-gray-500">\${players.length} calciatori</span>
+            </div>
+            <div class="space-y-1">
+              \${players.map(p => {
+                const isTaken = appState.assigned[p.nome];
+                let statusBadge = '';
+                if (!isTaken) statusBadge = \`<span class="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">LIBERO</span>\`;
+                else if (isTaken.team === 'Noi') statusBadge = \`<span class="text-[10px] font-bold text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded">TUO (\${isTaken.price}cr)</span>\`;
+                else statusBadge = \`<span class="text-[10px] text-gray-500 line-through">\${isTaken.team} (\${isTaken.price}cr)</span>\`;
+
+                return \`
+                  <div onclick="openPlayerModal('\${p.nome}')" class="cursor-pointer hover:bg-dark-700/60 p-1.5 rounded-lg flex items-center justify-between text-xs transition">
+                    <div class="flex items-center gap-2">
+                      <span class="font-bold text-white \${isTaken ? 'line-through text-gray-500' : ''}">\${p.nome}</span>
+                      <span class="text-[10px] text-gray-400">(\${p.squadra} • \${p.ruolo})</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      \${p.budget_target ? \`<span class="text-xs font-semibold text-amber-400">\${p.budget_target}cr</span>\` : ''}
+                      \${statusBadge}
+                    </div>
+                  </div>
+                \`;
+              }).join('')}
+            </div>
+          </div>
+        \`;
+      });
+
+      container.innerHTML = html || '<p class="text-xs text-gray-500 text-center py-6">Nessun obiettivo per questo filtro.</p>';
+    }
+
+    // Modal & Assign Flow
+    function openPlayerModal(playerName) {
+      selectedPlayer = appState.allPlayers.find(p => p.nome.toLowerCase() === playerName.toLowerCase());
+      if (!selectedPlayer) return;
+
+      const isTaken = appState.assigned[selectedPlayer.nome];
+      document.getElementById('modalPlayerHeader').innerHTML = \`
+        <div class="flex justify-between items-start">
+          <div>
+            <h3 class="text-lg font-bold text-white">\${selectedPlayer.nome}</h3>
+            <p class="text-xs text-gray-400">\${selectedPlayer.squadra} • \${selectedPlayer.ruolo} • Slot \${selectedPlayer.slot_10} (IA: \${selectedPlayer.ia_ordinamento})</p>
+          </div>
+          \${isTaken ? \`<span class="text-xs bg-red-500/20 text-red-400 px-2.5 py-1 rounded-lg font-bold">Assegnato a \${isTaken.team} (\${isTaken.price}cr)</span>\` : \`<span class="text-xs bg-emerald-500/20 text-emerald-400 px-2.5 py-1 rounded-lg font-bold">🟢 LIBERO</span>\`}
+        </div>
+        \${selectedPlayer.nota ? \`<p class="text-xs text-gray-300 italic mt-2 bg-dark-900 p-2 rounded-lg border border-dark-700">📝 \${selectedPlayer.nota}</p>\` : ''}
+      \`;
+
+      // Set suggested price
+      document.getElementById('assignPriceInput').value = selectedPlayer.budget_target || (selectedPlayer.slot_10 === 1 ? 250 : (selectedPlayer.slot_10 === 2 ? 140 : 20));
+
+      // Insights & Bluff
+      document.getElementById('modalTacticalInsights').innerHTML = \`
+        <div class="font-semibold text-emerald-400 flex items-center gap-1.5"><i class="fa-solid fa-chart-line"></i> Intelligence Tattica:</div>
+        <p class="text-gray-300">Stima d'asta realistica: <b>\${selectedPlayer.slot_10 === 1 ? '280-380' : '140-230'} cr</b>.</p>
+        <p class="text-gray-400">💡 <i>Usa i tasti rapidi qui sotto per assegnare in 1 click a Noi o a un avversario.</i></p>
+      \`;
+
+      // Team Buttons
+      const teamBtnContainer = document.getElementById('modalTeamButtons');
+      const teams = Object.keys(appState.teams);
+      teamBtnContainer.innerHTML = teams.map(tName => \`
+        <button onclick="selectTeamForAssign('\${tName}')" id="btnTeam_\${tName}" class="team-assign-btn text-xs py-1.5 px-2 rounded-lg border border-dark-600 bg-dark-800 hover:bg-dark-700 text-gray-200 truncate \${tName==='Noi'?'border-emerald-500 text-emerald-400 font-bold':''}">
+          \${tName}
+        </button>
+      \`).join('');
+
+      selectedTeamToAssign = "Noi";
+      document.getElementById('assignModal').classList.remove('hidden');
+    }
+
+    let selectedTeamToAssign = "Noi";
+    function selectTeamForAssign(tName) {
+      selectedTeamToAssign = tName;
+      document.querySelectorAll('.team-assign-btn').forEach(b => {
+        b.classList.remove('bg-emerald-600', 'text-white', 'border-emerald-400');
+      });
+      const target = document.getElementById(\`btnTeam_\${tName}\`);
+      if (target) {
+        target.classList.add('bg-emerald-600', 'text-white', 'border-emerald-400');
+      }
+    }
+
+    function adjustPrice(delta) {
+      const inp = document.getElementById('assignPriceInput');
+      inp.value = Math.max(1, parseInt(inp.value || 1) + delta);
+    }
+
+    async function confirmAssign() {
+      if (!selectedPlayer) return;
+      const price = parseInt(document.getElementById('assignPriceInput').value || 1);
+      try {
+        const res = await fetch('/api/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'assign',
+            player: selectedPlayer.nome,
+            team: selectedTeamToAssign,
+            price: price
+          })
+        });
+        if (res.ok) {
+          closeModal();
+          await fetchState();
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function closeModal() {
+      document.getElementById('assignModal').classList.add('hidden');
+    }
+
+    // Quick Actions
+    async function triggerSimula() {
+      if (confirm("Attivare la simulazione pre-asta attaccanti?")) {
+        await fetch('/api/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'simulate' }) });
+        await fetchState();
+      }
+    }
+
+    async function triggerUndo() {
+      await fetch('/api/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'undo' }) });
+      await fetchState();
+    }
+
+    async function triggerReset() {
+      if (confirm("Sei sicuro di voler resettare tutta l'asta a 1000 crediti?")) {
+        await fetch('/api/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'reset' }) });
+        await fetchState();
+      }
+    }
+
+    // Search Autocomplete
+    function onSearchInput(query) {
+      const resultsDiv = document.getElementById('searchResults');
+      if (!query || query.length < 2 || !appState) {
+        resultsDiv.classList.add('hidden');
+        return;
+      }
+      const q = query.toLowerCase().trim();
+      const matches = appState.allPlayers.filter(p => p.nome.toLowerCase().includes(q)).slice(0, 8);
+
+      if (matches.length === 0) {
+        resultsDiv.innerHTML = '<p class="text-xs text-gray-400 p-3 text-center">Nessun calciatore trovato</p>';
+      } else {
+        resultsDiv.innerHTML = matches.map(p => \`
+          <div onclick="openPlayerModal('\${p.nome}'); document.getElementById('searchResults').classList.add('hidden');" class="p-2.5 hover:bg-dark-700 cursor-pointer border-b border-dark-700/50 flex items-center justify-between text-xs">
+            <div>
+              <span class="font-bold text-white">\${p.nome}</span>
+              <span class="text-[10px] text-gray-400 ml-1.5">\${p.squadra} • \${p.ruolo} (Slot \${p.slot_10})</span>
+            </div>
+            <span class="text-emerald-400 font-semibold">\${p.budget_target ? p.budget_target + ' cr' : ''}</span>
+          </div>
+        \`).join('');
+      }
+      resultsDiv.classList.remove('hidden');
+    }
+
+    // Voice recognition in browser
+    function startVoiceRecognition() {
+      if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        alert("Il tuo browser non supporta il riconoscimento vocale diretto. Usa la barra di ricerca o Telegram.");
+        return;
+      }
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const rec = new SpeechRecognition();
+      rec.lang = 'it-IT';
+      rec.onstart = () => { document.getElementById('searchInput').placeholder = "🎙️ Parla adesso (es: Kean, Vlahovic)..."; };
+      rec.onresult = (e) => {
+        const text = e.results[0][0].transcript;
+        document.getElementById('searchInput').value = text;
+        onSearchInput(text);
+      };
+      rec.onend = () => { document.getElementById('searchInput').placeholder = "Cerca calciatore..."; };
+      rec.start();
+    }
+
+    // Auto-polling every 3 seconds
+    fetchState();
+    setInterval(fetchState, 3000);
+  </script>
+</body>
+</html>`;
 
 export default {
   async fetch(request, env, ctx) {
-    if (request.method === "GET") {
-      return new Response("⚽ FantaLive Tactical Bot is Running 24/7!", { status: 200 });
+    const url = new URL(request.url);
+
+    // 1. DASHBOARD WEB / TELEGRAM WEBAPP
+    if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/dashboard")) {
+      return new Response(DASHBOARD_HTML, {
+        headers: { "Content-Type": "text/html; charset=utf-8" }
+      });
     }
 
+    // 2. API STATO COMPLETO PER LA DASHBOARD
+    if (request.method === "GET" && url.pathname === "/api/state") {
+      const db = await getDatabase();
+      const meKey = auctionState.teams["Noi"] ? "Noi" : (auctionState.teams["NOI"] ? "NOI" : Object.keys(auctionState.teams)[0]);
+      
+      const tacticalHtml = generateTacticalAdvice(db ? db : { giocatori_per_reparto: {} }).replace(/\n/g, '<br>');
+      
+      const payload = {
+        teams: auctionState.teams,
+        assigned: auctionState.assigned,
+        scarcity: db ? db.giocatori_per_reparto : {},
+        targets: db ? db.obiettivi : {},
+        allPlayers: db ? db.tutti_i_giocatori : [],
+        tacticalAdviceHtml: tacticalHtml
+      };
+      return new Response(JSON.stringify(payload), {
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+      });
+    }
+
+    // 3. API AZIONI DALLA DASHBOARD
+    if (request.method === "POST" && url.pathname === "/api/action") {
+      try {
+        const body = await request.json();
+        const db = await getDatabase();
+        if (body.action === "assign") {
+          const player = findBestPlayer(body.player, db.tutti_i_giocatori);
+          if (player) {
+            assignPlayer(player, body.team || "Noi", parseInt(body.price || 1));
+          }
+        } else if (body.action === "undo") {
+          undoLastAction();
+        } else if (body.action === "reset") {
+          resetAuction();
+        } else if (body.action === "simulate") {
+          runAttackSimulation(db);
+        }
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+      }
+    }
+
+    // 4. TELEGRAM WEBHOOK POST
     if (request.method === "POST") {
       try {
         const update = await request.json();
@@ -1378,6 +1985,7 @@ async function sendMainMenu(chatId) {
 function getRepartoKeyboard() {
   return {
     keyboard: [
+      [{ text: "📱 Apri Live Dashboard", web_app: { url: "https://fantasoci-bot.marcol8b-2.workers.dev/" } }],
       [{ text: "🧠 Tattica Consigliata" }, { text: "⭐ I Miei Obiettivi" }],
       [{ text: "⚽ Attacco" }, { text: "🎯 Centrocampo" }],
       [{ text: "🛡️ Difesa" }, { text: "🧤 Portieri" }],
