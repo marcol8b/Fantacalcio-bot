@@ -117,7 +117,7 @@ async function handleTelegramMessage(msg, env) {
     return;
   }
 
-  if (lower === "/reset" || lower === "reset") {
+  if (lower === "/reset" || lower === "reset" || lower === "🔄 reset asta" || lower === "reset asta") {
     resetAuction();
     await sendMessage(chatId, "🔄 <b>Asta Resettata!</b>\nTutte le 10 squadre sono state ripristinate a <b>1000 crediti</b> e le rose svuotate.");
     return;
@@ -575,7 +575,7 @@ function getRepartoKeyboard() {
       [{ text: "⚽ Attacco" }, { text: "🎯 Centrocampo" }],
       [{ text: "🛡️ Difesa" }, { text: "🧤 Portieri" }],
       [{ text: "⭐ I Miei Obiettivi" }, { text: "💰 Saldi e Crediti" }],
-      [{ text: "📋 La Mia Rosa" }]
+      [{ text: "📋 La Mia Rosa" }, { text: "🔄 Reset Asta" }]
     ],
     resize_keyboard: true,
     persistent: true
