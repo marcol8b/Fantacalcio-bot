@@ -117,6 +117,27 @@ async function handleTelegramMessage(msg, env) {
     return;
   }
 
+  
+  // IMPOSTA SQUADRE: /squadre Nome1, Nome2, Nome3...
+  if (lower.startsWith("/squadre ")) {
+    const rawList = text.substring(9).trim();
+    const names = rawList.split(/[,\n]/).map(n => n.trim()).filter(n => n.length > 0);
+    if (names.length < 2) {
+      await sendMessage(chatId, "⚠️ Inserisci almeno 2 o più squadre separate da virgola (es: <code>/squadre Noi, Peppe, Cece, Zio, Nero, Gino, Cugino, Paolo, Andrea, Chiap</code>).");
+      return;
+    }
+    auctionState.teams = {};
+    names.forEach(n => {
+      auctionState.teams[n] = { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
+    });
+    // Se "NOI" non è presente tra i nomi, la prima squadra è considerata NOI
+    if (!auctionState.teams["NOI"] && names.length > 0) {
+      auctionState.teams["NOI"] = { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
+    }
+    await sendMessage(chatId, `✅ <b>Impostate ${Object.keys(auctionState.teams).length} Squadre a 1000 crediti:</b>\n` + Object.keys(auctionState.teams).map(t => `• <b>${t}</b>`).join("\n"));
+    return;
+  }
+
   if (lower === "/reset" || lower === "reset" || lower === "🔄 reset asta" || lower === "reset asta") {
     resetAuction();
     await sendMessage(chatId, "🔄 <b>Asta Resettata!</b>\nTutte le 10 squadre sono state ripristinate a <b>1000 crediti</b> e le rose svuotate.");
