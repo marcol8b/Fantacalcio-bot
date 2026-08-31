@@ -488,43 +488,80 @@ async function sendAttaccoStatus(chatId, db) {
   const s2 = getFree("SLOT_2");
   const s3 = getFree("SLOT_3");
 
-  let teamsWithTop = 0;
-  let opponentBudgetsNoTop = [];
-
-  for (const [tName, tData] of Object.entries(auctionState.teams)) {
-    if (tName === "Noi" || tName === "NOI") continue;
-    const hasTop = tData.players.some(p => p.ruolo === "A" && p.prezzo >= 150);
-    if (hasTop || (tData.role_count.A >= 1 && tData.players.some(p => p.ruolo === "A"))) {
-      teamsWithTop++;
-    } else {
-      opponentBudgetsNoTop.push(tData.budget);
-    }
-  }
-
-  opponentBudgetsNoTop.sort((a, b) => b - a);
-  const myTeam = auctionState.teams["Noi"] || auctionState.teams["NOI"] || { budget: 1000 };
+  const meKey = auctionState.teams["Noi"] ? "Noi" : (auctionState.teams["NOI"] ? "NOI" : Object.keys(auctionState.teams)[0]);
+  const myTeam = auctionState.teams[meKey] || { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
   const myBudget = myTeam.budget;
 
-  let advice = "";
-  if (s1.length <= 2 && s1.length > 0 && opponentBudgetsNoTop.length >= 3) {
-    advice = `🚨 <b>ALLARME SCARSITÀ:</b> Restano solo <b>${s1.length} Super Top</b> per <b>${opponentBudgetsNoTop.length} avversari</b> senza top! Prezzi in salita: o forzi subito ${s1[0].nome} oppure punta dritto su Kean/Scamacca/Hojlund!`;
-  } else if (myBudget >= (opponentBudgetsNoTop[0] || 0)) {
-    advice = `👑 <b>SEI IL PIÙ RICCO (${myBudget} cr)!</b> Puoi dettare il prezzo del top sapendo che nessun concorrente diretto può superarti.`;
-  } else {
-    advice = `💡 <b>CONSIGLIO TATTICO:</b> Ci sono ${opponentBudgetsNoTop.length} squadre a caccia del top (max crediti: ${opponentBudgetsNoTop.slice(0, 3).join(", ")} cr). Non strapagare oltre 350 cr: sfrutta i 2° slot come Kean/Scamacca/Ramos!`;
+  // Analisi di ciascuna squadra per l'attacco
+  let teamDetails = [];
+  let oppsNoTop = [];
+
+  for (const [tName, tData] of Object.entries(auctionState.teams)) {
+    const isMe = (tName === meKey);
+    const aCount = tData.role_count.A || 0;
+    const aMissing = Math.max(0, 6 - aCount);
+    
+    // Calcola posti mancanti negli altri ruoli (per sapere quanti crediti DEVE tenere da parte a 1 credito ciascuno)
+    const otherMissing = Math.max(0, 3 - (tData.role_count.P || 0)) + 
+                         Math.max(0, 8 - (tData.role_count.D || 0)) + 
+                         Math.max(0, 8 - (tData.role_count.C || 0)) + 
+                         Math.max(0, aMissing - 1);
+    const maxBidAttacco = Math.max(1, tData.budget - otherMissing);
+
+    const topPlayer = tData.players.find(p => p.ruolo === "A" && p.prezzo >= 130);
+    const statusTop = topPlayer ? `✅ <b>${topPlayer.nome}</b> (${topPlayer.prezzo}cr)` : `❌ <i>Senza Top</i>`;
+
+    if (!topPlayer && !isMe) {
+      oppsNoTop.push({ name: tName, budget: tData.budget, maxBid: maxBidAttacco });
+    }
+
+    teamDetails.push({
+      name: tName,
+      isMe: isMe,
+      budget: tData.budget,
+      aCount: aCount,
+      aMissing: aMissing,
+      maxBid: maxBidAttacco,
+      topPlayer: topPlayer,
+      statusTop: statusTop
+    });
   }
 
-  let text = `⚽ <b>STATUS ATTACCO (Lega a 10)</b>\n` +
-             `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-             `🔴 <b>SLOT 1 (Super Top):</b> ${s1.length} rimasti ➔ ${s1.map(p => `<b>${p.nome}</b>`).join(", ") || "<i>Nessuno</i>"}\n\n` +
-             `🟠 <b>SLOT 2 (Top 15+ gol):</b> ${s2.length} rimasti ➔ ${s2.slice(0, 6).map(p => p.nome).join(", ")}${s2.length > 6 ? "..." : ""}\n\n` +
-             `🟡 <b>SLOT 3 (Titolari 8-10 gol):</b> ${s3.length} rimasti\n\n` +
-             `👥 <b>SITUAZIONE AVVERSARI:</b>\n` +
-             `• ${teamsWithTop} squadre hanno già il 1° slot d'attacco.\n` +
-             `• <b>${opponentBudgetsNoTop.length} avversari</b> sono ancora SENZA il Top.\n\n` +
-             `${advice}`;
+  // Ordina le squadre per budget residuo
+  teamDetails.sort((a, b) => b.budget - a.budget);
+  oppsNoTop.sort((a, b) => b.maxBid - a.maxBid);
 
-  await sendMessage(chatId, text, getRepartoKeyboard());
+  let lines = [
+    `⚽ <b>STATUS ATTACCO DETTAGLIATO (Lega a 10)</b>`,
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `🔴 <b>SLOT 1 (Super Top):</b> ${s1.length} rimasti ➔ ${s1.map(p => `<b>${p.nome}</b>`).join(", ") || "<i>Finiti!</i>"}\n`,
+    `🟠 <b>SLOT 2 (Top 15+ gol):</b> ${s2.length} rimasti ➔ ${s2.slice(0, 6).map(p => p.nome).join(", ")}${s2.length > 6 ? "..." : ""}\n`,
+    `🟡 <b>SLOT 3 (Titolari 8-10 gol):</b> ${s3.length} rimasti\n`,
+    `👥 <b>QUADRO AVVERSARI & SLOT ATTACCO RIMASTI:</b>`
+  ];
+
+  teamDetails.forEach((t, idx) => {
+    const badge = t.isMe ? " 👑 (TU)" : "";
+    lines.push(
+      `${idx + 1}. <b>${t.name}</b>${badge}: <b>${t.budget} cr</b> | Slot A: <b>${t.aCount}/6</b> (mancano ${t.aMissing})\n` +
+      `   └ 1° Slot: ${t.statusTop} | Max Offerta Singola: <b>${t.maxBid} cr</b>`
+    );
+  });
+
+  lines.push(""); // Spazio vuoto
+
+  // Consiglio tattico calibrato
+  if (s1.length <= 2 && s1.length > 0 && oppsNoTop.length >= 3) {
+    lines.push(`🚨 <b>ALLARME SCARSITÀ:</b> Restano solo <b>${s1.length} Super Top</b> ma ben <b>${oppsNoTop.length} squadre</b> cercano il 1° slot!`);
+    lines.push(`💡 <i>I più ricchi senza top: ${oppsNoTop.slice(0, 3).map(o => `<b>${o.name}</b> (max ${o.maxBid}cr)`).join(", ")}.</i>`);
+    lines.push(`👉 <b>Strategia:</b> Fai scannare ${oppsNoTop[0] ? oppsNoTop[0].name : "gli avversari"} su ${s1[0].nome} per svuotargli i crediti, e assicurati subito uno tra <b>Kean, Scamacca o Hojlund</b>!`);
+  } else if (myBudget >= (oppsNoTop[0] ? oppsNoTop[0].budget : 0)) {
+    lines.push(`👑 <b>SEI IL PIÙ RICCO (${myBudget} cr)!</b> Nessun avversario senza top può superare la tua offerta massima.`);
+  } else {
+    lines.push(`💡 <b>TATTICA:</b> Concorrenti più pericolosi per l'attacco: ${oppsNoTop.slice(0, 2).map(o => `<b>${o.name}</b> (${o.maxBid}cr)`).join(" e ")}.`);
+  }
+
+  await sendMessage(chatId, lines.join("\n"), getRepartoKeyboard());
 }
 
 async function sendCentrocampoStatus(chatId, db) {
@@ -656,13 +693,63 @@ async function handlePlayerLookup(chatId, text, db) {
     return;
   }
 
+  const meKey = auctionState.teams["Noi"] ? "Noi" : (auctionState.teams["NOI"] ? "NOI" : Object.keys(auctionState.teams)[0]);
+  const me = auctionState.teams[meKey] || { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
+
+  // Calcola i contendenti più probabili per questo giocatore
+  let interestedTeams = [];
+  for (const [tName, tData] of Object.entries(auctionState.teams)) {
+    if (tName === meKey) continue;
+    
+    // Controlla se hanno già il top in questo ruolo
+    const hasTopInRole = (p.ruolo === "A" && tData.players.some(x => x.ruolo === "A" && x.prezzo >= 130)) ||
+                         (p.ruolo === "C" && tData.players.some(x => x.ruolo === "C" && x.prezzo >= 70));
+    
+    const roleCount = tData.role_count[p.ruolo] || 0;
+    const maxRole = (p.ruolo === "P" ? 3 : (p.ruolo === "D" || p.ruolo === "C" ? 8 : 6));
+    
+    if (roleCount < maxRole) {
+      interestedTeams.push({
+        name: tName,
+        budget: tData.budget,
+        hasTop: hasTopInRole,
+        score: tData.budget + (!hasTopInRole ? 150 : 0)
+      });
+    }
+  }
+
+  interestedTeams.sort((a, b) => b.score - a.budget);
+  const topContenders = interestedTeams.slice(0, 3);
+
+  // Stima Prezzo Probabile d'Asta
+  let estimatedMin = 1;
+  let estimatedMax = 5;
+  if (p.ruolo === "A") {
+    if (p.slot_10 === 1) { estimatedMin = 280; estimatedMax = 380; }
+    else if (p.slot_10 === 2) { estimatedMin = 140; estimatedMax = 230; }
+    else if (p.slot_10 === 3) { estimatedMin = 60; estimatedMax = 120; }
+    else { estimatedMin = 10; estimatedMax = 40; }
+  } else if (p.ruolo === "C") {
+    if (p.slot_10 === 1) { estimatedMin = 90; estimatedMax = 140; }
+    else if (p.slot_10 === 2) { estimatedMin = 45; estimatedMax = 80; }
+    else if (p.slot_10 === 3) { estimatedMin = 15; estimatedMax = 40; }
+    else { estimatedMin = 2; estimatedMax = 12; }
+  } else if (p.ruolo === "D") {
+    if (p.slot_10 === 1) { estimatedMin = 40; estimatedMax = 70; }
+    else if (p.slot_10 === 2) { estimatedMin = 15; estimatedMax = 35; }
+    else { estimatedMin = 1; estimatedMax = 10; }
+  } else if (p.ruolo === "P") {
+    if (p.slot_10 === 1) { estimatedMin = 60; estimatedMax = 90; }
+    else { estimatedMin = 10; estimatedMax = 40; }
+  }
+
   let badge = "";
   if (p.tag_obiettivo === "GIALLO_MUST_HAVE") badge = "\n🟡 <b>TUO OBIETTIVO: MUST HAVE</b>";
   if (p.tag_obiettivo === "ROSA_PRIMO_SLOT_MUST_HAVE") badge = "\n🌸 <b>TUO OBIETTIVO: 1° SLOT MUST HAVE</b>";
   if (p.tag_obiettivo === "BLU_OTTIMO_TITOLARE") badge = "\n🔵 <b>TUO OBIETTIVO: OTTIMO TITOLARE</b>";
   if (p.tag_obiettivo === "GRIGIO_SCOMMESSINA") badge = "\n⚪ <b>TUO OBIETTIVO: SCOMMESSINA</b>";
 
-  const budgetStr = p.budget_target ? `\n🎯 <b>Tuo Budget Target:</b> ${p.budget_target} cr` : "";
+  const budgetStr = p.budget_target ? `\n🎯 <b>Tuo Budget Target:</b> <b>${p.budget_target} cr</b>` : "";
   const notaStr = p.nota ? `\n📝 <b>Nota Tattica:</b> <i>${p.nota}</i>` : "";
   
   let statsStr = "";
@@ -681,20 +768,34 @@ async function handlePlayerLookup(chatId, text, db) {
     if (p.budget_target && !isNaN(parseInt(p.budget_target))) {
       const bMax = parseInt(p.budget_target);
       if (askedPrice <= bMax) {
-        evalStr = `\n\n💡 <b>VALUTAZIONE A ${askedPrice} cr:</b> In linea con il tuo budget target (${bMax} cr). <b>CONSIGLIATO RILANCIARE!</b>`;
+        evalStr = `\n\n💡 <b>VALUTAZIONE A ${askedPrice} cr:</b> In linea con il tuo target (${bMax} cr). <b>CONSIGLIATO RILANCIARE!</b>`;
       } else {
         evalStr = `\n\n⚠️ <b>VALUTAZIONE A ${askedPrice} cr:</b> Supera il tuo budget target di ${bMax} cr. Valuta se lasciarlo!`;
       }
     }
   }
 
+  // Sezione Tattica di Asta, Contendenti e Bluff
+  let bluffAdvice = "";
+  if (!auctionState.assigned[p.nome] && p.slot_10 <= 3) {
+    const primaryTarget = (topContenders[0] ? topContenders[0].name : "un avversario ricco");
+    const primaryBudget = (topContenders[0] ? topContenders[0].budget : 1000);
+    
+    bluffAdvice = `\n\n🎯 <b>SIMULAZIONE & TATTICA D'ASTA:</b>` +
+                  `\n💸 <b>A quanto potrebbe andare:</b> ~<b>${estimatedMin} - ${estimatedMax} crediti</b>` +
+                  `\n👥 <b>Chi lo potrebbe prendere:</b> ${topContenders.map(c => `<b>${c.name}</b> (${c.budget} cr ${c.hasTop ? "ha già top" : "senza top"})`).join(", ") || "Tutti"}` +
+                  `\n🃏 <b>TRAPPOLA / BLUFF STRATEGICO:</b>` +
+                  `\n<i>Se il tuo vero obiettivo è un altro, rilancia su <b>${p.nome}</b> fino a ~${Math.floor(estimatedMin * 0.9)} cr per far spendere e prosciugare <b>${primaryTarget} (${primaryBudget} cr)</b>. Così libererai il campo per il tuo vero colpo!</i>`;
+  }
+
   const out = `🎵 <b>${p.nome.toUpperCase()}</b> (${p.squadra} - <b>${p.ruolo}</b>)${badge}` +
               `\n━━━━━━━━━━━━━━━━━━━━━━━━━━` +
-              `\n🏷️ <b>Slot Lega a 10:</b> SLOT ${p.slot_10} (Indice Appetibilità: ${p.ia_ordinamento})` +
+              `\n🏷️ <b>Slot Lega a 10:</b> SLOT ${p.slot_10} (Appetibilità IA: ${p.ia_ordinamento})` +
               `\n🛡️ <b>Titolarità:</b> ${p.titolarita}/5` +
               budgetStr +
               notaStr +
               statsStr +
+              bluffAdvice +
               evalStr +
               statusAssigned;
 
