@@ -764,7 +764,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       if (selectedPlayer.tag_obiettivo === 'BLU_OTTIMO_TITOLARE') badgeHtml = '<span class="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded font-bold border border-blue-500/30">🔵 OTTIMO TITOLARE</span>';
       if (selectedPlayer.tag_obiettivo === 'GRIGIO_SCOMMESSINA') badgeHtml = '<span class="text-xs bg-gray-500/20 text-gray-300 px-2 py-0.5 rounded font-bold border border-gray-500/30">⚪ SCOMMESSINA</span>';
 
-      document.getElementById('modalPlayerHeader').innerHTML = `
+      document.getElementById('modalPlayerHeader').innerHTML = ` + "`" + `
         <div class="flex justify-between items-start gap-2">
           <div>
             <div class="flex items-center gap-2">
@@ -781,7 +781,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
         \${selectedPlayer.budget_target ? `<div class="text-xs text-emerald-400 font-bold mt-1.5 bg-emerald-950/30 px-2.5 py-1 rounded-lg border border-emerald-500/20">🎯 Tuo Budget Target da Excel: <b>\${selectedPlayer.budget_target} cr</b></div>` : ''}
         \${selectedPlayer.nota ? `<p class="text-xs text-gray-300 italic mt-2 bg-dark-900 p-2.5 rounded-xl border border-dark-700">📝 <b>Nota Tattica:</b> \${selectedPlayer.nota}</p>` : ''}
-      `;
+      ` + "`" + `;
 
       // Prezzo suggerito
       document.getElementById('assignPriceInput').value = selectedPlayer.budget_target || (selectedPlayer.slot_10 === 1 ? 250 : (selectedPlayer.slot_10 === 2 ? 140 : 20));
@@ -792,11 +792,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       // Bottoni Squadre per l'assegnazione
       const teamBtnContainer = document.getElementById('modalTeamButtons');
       const teams = Object.keys(appState.teams);
-      teamBtnContainer.innerHTML = teams.map(tName => `
+      teamBtnContainer.innerHTML = teams.map(tName => ` + "`" + `
         <button onclick="selectTeamForAssign('\${tName}')" id="btnTeam_\${tName}" class="team-assign-btn text-xs py-1.5 px-2 rounded-lg border border-dark-600 bg-dark-800 hover:bg-dark-700 text-gray-200 truncate \${tName==='Noi'||tName==='NOI'?'bg-emerald-600 text-white border-emerald-400 font-bold':''}">
           \${tName}
         </button>
-      `).join('');
+      ` + "`" + `).join('');
 
       selectedTeamToAssign = (appState.teams["Noi"] ? "Noi" : (appState.teams["NOI"] ? "NOI" : Object.keys(appState.teams)[0]));
       
