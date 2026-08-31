@@ -108,7 +108,7 @@ async function handleTelegramMessage(msg, env) {
   const lower = text.toLowerCase();
 
   // COMANDI MENU
-  if (lower === "/start" || lower === "/help" || lower === "menu") {
+  if (lower === "/start" || lower === "/help" || lower === "/comandi" || lower === "comandi" || lower === "/guida" || lower === "guida" || lower === "menu" || lower === "help") {
     await sendMainMenu(chatId);
     return;
   }
@@ -1287,14 +1287,32 @@ async function transcribeTelegramVoice(fileId, env) {
 }
 
 async function sendMainMenu(chatId) {
-  const text = `⚽ <b>FantaLive Tactical Bot</b>\n` +
-               `Il tuo assistente strategico per l'asta a 10 (1000 crediti).\n\n` +
-               `<b>Comandi Rapidi:</b>\n` +
-               `• 🔍 <b>Cerca:</b> Scrivi il nome (es. <i>kean</i> o <i>kean 140</i>).\n` +
-               `• ⚡ <b>Assegna:</b> <code>mio kean 140</code> oppure <code>via lautaro 320 peppe</code>.\n` +
-               `• 👥 <b>Squadre:</b> <code>/squadre</code> o <code>/squadra Peppe</code>.\n` +
-               `• 🎙️ <b>Vocale:</b> Dici a voce <i>"Lautaro a Peppe per 320"</i>.\n` +
-               `• ↩️ <b>Annulla:</b> <code>/annulla</code>.`;
+  const text = `📖 <b>LISTA COMPLETA DEI COMANDI DISPONIBILI</b>\n` +
+               `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+               `⚡ <b>1. ASSEGNAZIONI E RIMOZIONI:</b>\n` +
+               `• <code>/add giocatore prezzo squadra</code> (es: <code>/add kean 140 Noi</code> o <code>/add lautaro 320 Peppe</code>)\n` +
+               `• <code>/rem giocatore squadra</code> ➔ Rimuove il giocatore restituendo i crediti (solo se corrisponde alla rosa!).\n` +
+               `• <code>mio kean 140</code> (o vocale: <i>"Mio Kean a 140"</i>) ➔ Assegna a Noi.\n` +
+               `• <code>via lautaro 320 peppe</code> ➔ Assegna all'avversario.\n` +
+               `• <code>/annulla</code> ➔ Annulla l'ultima operazione effettuata.\n\n` +
+               `👥 <b>2. GESTIONE SQUADRE E ROSE:</b>\n` +
+               `• <code>/squadre</code> ➔ Elenco delle 10 squadre e crediti.\n` +
+               `• <code>/squadre Noi, Peppe, Cece...</code> ➔ Imposta i nomi dei 10 partecipanti.\n` +
+               `• <code>/squadra Peppe</code> (o <code>/rosa Peppe</code>) ➔ Mostra la rosa dettagliata di una squadra.\n` +
+               `• <b>📋 La Mia Rosa</b> (o <code>/rosa</code>) ➔ Visualizza la tua rosa e i crediti rimasti.\n` +
+               `• <b>💰 Saldi e Crediti</b> (o <code>/saldi</code>) ➔ Classifica generale dei crediti.\n\n` +
+               `📊 <b>3. RADAR TATTICO E REPARTI:</b>\n` +
+               `• <b>⚽ Attacco</b> (o <code>/att</code>) ➔ Tabella 10 squadre, slot liberi, stato top e max offerta singola.\n` +
+               `• <b>🎯 Centrocampo</b> (o <code>/cc</code>) ➔ Tabella 10 squadre per centrocampo e top bonus rimasti.\n` +
+               `• <b>🛡️ Difesa</b> (o <code>/dif</code>) e <b>🧤 Portieri</b> (o <code>/por</code>).\n` +
+               `• <b>🧠 Tattica Consigliata</b> (o <code>/tattica</code>) ➔ Analisi strategica 360° e gestione crediti medi.\n` +
+               `• <b>⭐ I Miei Obiettivi</b> (o <code>/obiettivi</code>) ➔ Mappa live 72 obiettivi divisi per Ruolo (Giallo, Rosa, Blu, Grigio).\n\n` +
+               `🔍 <b>4. SCHEDA CALCIATORE & BLUFF:</b>\n` +
+               `• Scrivi solo il cognome: <code>kean</code> o <code>vlahovic</code> o <code>rowe</code> ➔ Scheda, slot, stima prezzo, chi sta SOPRA e chi SOTTO di te, e bersaglio di bluff!\n` +
+               `• Scrivi nome + prezzo: <code>kean 150</code> ➔ Valutazione se rilanciare o lasciare.\n\n` +
+               `🎮 <b>5. UTILITÀ:</b>\n` +
+               `• <code>/simula</code> ➔ Popola P, D, C per testare l'asta attaccanti.\n` +
+               `• <code>/reset</code> (o <b>[🔄 Reset Asta]</b>) ➔ Azzera l'asta e ripristina tutti a 1000 crediti.`;
 
   await sendMessage(chatId, text, getRepartoKeyboard());
 }
