@@ -1,3 +1,68 @@
+// ⚽ FantaLive Tactical Bot & Web Dashboard - Cloudflare Worker
+// Lega a 10 partecipanti, 1000 crediti
+
+const TELEGRAM_TOKEN = "8815005406:AAGwSBf--WvbEMCeQ1AusqJGQaXn1oxO0y4";
+const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
+const GROQ_API_KEY = ""; // Opzionale per i vocali gratuiti (console.groq.com)
+
+// Stato in-memory dell'asta con le 10 squadre predefinite dal file Excel
+let auctionState = {
+  teams: {
+    "Noi": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+    "Peppe": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+    "Cece": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+    "Zio": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+    "Nero": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+    "Gino": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+    "Cugino": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+    "Paolo": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+    "Andrea": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+    "Chiap": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } }
+  },
+  assigned: {},
+  history: []
+};
+
+let databaseCache = null;
+
+async function getDatabase() {
+  if (databaseCache) return databaseCache;
+  try {
+    const res = await fetch("https://raw.githubusercontent.com/marcol8b/Fantacalcio-bot/main/fanta_database.json");
+    if (res.ok) {
+      databaseCache = await res.json();
+      return databaseCache;
+    }
+  } catch (e) {
+    console.error("Errore fetch database:", e);
+  }
+  return null;
+}
+
+function normalize(str) {
+  if (!str) return "";
+  return str.toLowerCase().replace(/[\-_/\\.,:']/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function findBestPlayer(query, allPlayers) {
+  if (!allPlayers || allPlayers.length === 0) return null;
+  const q = normalize(query);
+  if (!q) return null;
+  
+  let exact = allPlayers.find(p => normalize(p.nome) === q);
+  if (exact) return exact;
+
+  let starts = allPlayers.filter(p => normalize(p.nome).startsWith(q));
+  if (starts.length === 1) return starts[0];
+
+  let contains = allPlayers.filter(p => normalize(p.nome).includes(q));
+  if (contains.length > 0) {
+    contains.sort((a, b) => (a.slot_10 - b.slot_10) || (b.ia_ordinamento - a.ia_ordinamento));
+    return contains[0];
+  }
+  return null;
+}
+
 const DASHBOARD_HTML = `<!DOCTYPE html>
 <html lang="it" class="dark">
 <head>
@@ -634,7 +699,8 @@ export default {
       const db = await getDatabase();
       const meKey = auctionState.teams["Noi"] ? "Noi" : (auctionState.teams["NOI"] ? "NOI" : Object.keys(auctionState.teams)[0]);
       
-      const tacticalHtml = generateTacticalAdvice(db ? db : { giocatori_per_reparto: {} }).replace(/\n/g, '<br>');
+      const tacticalAdvice = db ? generateTacticalAdvice(db) : "Caricamento in corso...";
+      const tacticalHtml = tacticalAdvice.replace(/\n/g, '<br>');
       
       const payload = {
         teams: auctionState.teams,
@@ -645,7 +711,10 @@ export default {
         tacticalAdviceHtml: tacticalHtml
       };
       return new Response(JSON.stringify(payload), {
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+        headers: { 
+          "Content-Type": "application/json", 
+          "Access-Control-Allow-Origin": "*" 
+        }
       });
     }
 
@@ -667,7 +736,10 @@ export default {
           runAttackSimulation(db);
         }
         return new Response(JSON.stringify({ ok: true }), {
-          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+          headers: { 
+            "Content-Type": "application/json", 
+            "Access-Control-Allow-Origin": "*" 
+          }
         });
       } catch (err) {
         return new Response(JSON.stringify({ error: err.message }), { status: 500 });
@@ -726,17 +798,16 @@ async function handleTelegramMessage(msg, env) {
   text = text.trim();
   const lower = text.toLowerCase();
 
-  // COMANDI MENU
+  // COMANDI PRINCIPALI
   if (lower === "/start" || lower === "/help" || lower === "/comandi" || lower === "comandi" || lower === "/guida" || lower === "guida" || lower === "menu" || lower === "help") {
     await sendMainMenu(chatId);
     return;
   }
 
-  // 1. GESTIONE SQUADRE (LISTA O SETUP): /squadre oppure squadre oppure /squadre Nome1, Nome2...
+  // GESTIONE SQUADRE: /squadre oppure squadre oppure /squadre Nome1, Nome2...
   if (lower.startsWith("/squadre") || lower.startsWith("squadre")) {
     let cleanParam = text.replace(/^\/?squadre(@[a-zA-Z0-9_]+)?/i, "").trim();
     
-    // Se non ha passato argomenti, mostra la lista attuale
     if (!cleanParam) {
       const currentList = Object.keys(auctionState.teams).map((t, idx) => `${idx + 1}. <b>${t}</b> (${auctionState.teams[t].budget} cr - ${auctionState.teams[t].players.length} giocatori)`).join("\n");
       await sendMessage(chatId, `👥 <b>SQUADRE PARTECIPANTI (Lega a 10):</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${currentList}\n\n💡 <i>Per cambiare i nomi scrivi:</i>\n<code>/squadre Noi, Peppe, Cece, Zio, Nero, Gino, Cugino, Paolo, Andrea, Chiap</code>`);
@@ -762,8 +833,8 @@ async function handleTelegramMessage(msg, env) {
     return;
   }
 
-  // 2. RESET ASTA
-    if (lower === "/simula" || lower === "/simula_attacco" || lower === "simula" || lower === "🎮 simula pre-asta attacco") {
+  // SIMULAZIONE PRE-ASTA ATTACCO
+  if (lower === "/simula" || lower === "/simula_attacco" || lower === "simula" || lower === "🎮 simula pre-asta attacco") {
     runAttackSimulation(db);
     const textOut = `🎮 <b>SIMULAZIONE PRE-ASTA ATTACCO ATTIVATA!</b>\n` +
                     `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -775,26 +846,69 @@ async function handleTelegramMessage(msg, env) {
     return;
   }
 
+  // RESET ASTA
   if (lower === "/reset" || lower === "reset" || lower === "🔄 reset asta" || lower === "reset asta") {
     resetAuction();
     await sendMessage(chatId, "🔄 <b>Asta Resettata!</b>\nTutte le 10 squadre sono state ripristinate a <b>1000 crediti</b> e tutti i 517 giocatori sono liberi.");
     return;
   }
 
-  // 3. ANNULLA
+  // ANNULLA
   if (lower === "/annulla" || lower === "annulla") {
     const res = undoLastAction();
     await sendMessage(chatId, res);
     return;
   }
 
-  // 4. CONSULTA LA MIA ROSA (/rosa)
+  // TATTICA CONSIGLIATA
+  if (lower === "/tattica" || lower === "tattica" || lower === "🧠 tattica consigliata" || lower === "consiglio") {
+    const advice = generateTacticalAdvice(db);
+    await sendMessage(chatId, advice, getRepartoKeyboard());
+    return;
+  }
+
+  // REPARTI
+  if (lower === "/att" || lower === "attaccanti" || lower === "⚽ attacco") {
+    await sendAttaccoStatus(chatId, db);
+    return;
+  }
+
+  if (lower === "/cc" || lower === "centrocampisti" || lower === "🎯 centrocampo") {
+    await sendCentrocampoStatus(chatId, db);
+    return;
+  }
+
+  if (lower === "/dif" || lower === "difensori" || lower === "🛡️ difesa") {
+    await sendDifesaStatus(chatId, db);
+    return;
+  }
+
+  if (lower === "/por" || lower === "portieri" || lower === "🧤 portieri") {
+    await sendPortieriStatus(chatId, db);
+    return;
+  }
+
+  // OBIETTIVI
+  if (lower.startsWith("/obiettivi") || lower.startsWith("obiettivi") || lower === "⭐ i miei obiettivi") {
+    let cleanParam = text.replace(/^\/?obiettivi(@[a-zA-Z0-9_]+)?/i, "").trim();
+    if (lower === "⭐ i miei obiettivi") cleanParam = "";
+    await sendObiettiviStatus(chatId, db, cleanParam || null);
+    return;
+  }
+
+  // SALDI E CREDITI
+  if (lower === "/saldi" || lower === "saldi" || lower === "💰 saldi e crediti") {
+    await sendSaldiStatus(chatId);
+    return;
+  }
+
+  // LA MIA ROSA
   if (lower === "/rosa" || lower === "rosa" || lower === "📋 la mia rosa") {
     await sendMiaRosaStatus(chatId);
     return;
   }
 
-  // 5. CONSULTA SQUADRA SPECIFICA (/squadra <Nome> oppure squadra <Nome> oppure /rosa <Nome>)
+  // CONSULTA SQUADRA SPECIFICA (/squadra <Nome> oppure squadra <Nome> oppure /rosa <Nome>)
   if (lower.startsWith("/squadra") || lower.startsWith("squadra") || lower.startsWith("/rosa ") || (lower.startsWith("rosa ") && lower !== "rosa")) {
     let qTeam = "";
     if (lower.startsWith("/squadra") || lower.startsWith("squadra")) {
@@ -856,46 +970,7 @@ async function handleTelegramMessage(msg, env) {
     return;
   }
 
-  // 6. BOTTONI RAPIDI DI REPARTO
-    if (lower === "/tattica" || lower === "tattica" || lower === "🧠 tattica consigliata" || lower === "consiglio") {
-    const advice = generateTacticalAdvice(db);
-    await sendMessage(chatId, advice, getRepartoKeyboard());
-    return;
-  }
-
-  if (lower === "/att" || lower === "attaccanti" || lower === "⚽ attacco") {
-    await sendAttaccoStatus(chatId, db);
-    return;
-  }
-
-  if (lower === "/cc" || lower === "centrocampisti" || lower === "🎯 centrocampo") {
-    await sendCentrocampoStatus(chatId, db);
-    return;
-  }
-
-  if (lower === "/dif" || lower === "difensori" || lower === "🛡️ difesa") {
-    await sendDifesaStatus(chatId, db);
-    return;
-  }
-
-  if (lower === "/por" || lower === "portieri" || lower === "🧤 portieri") {
-    await sendPortieriStatus(chatId, db);
-    return;
-  }
-
-  if (lower.startsWith("/obiettivi") || lower.startsWith("obiettivi") || lower === "⭐ i miei obiettivi") {
-    let cleanParam = text.replace(/^\/?obiettivi(@[a-zA-Z0-9_]+)?/i, "").trim();
-    if (lower === "⭐ i miei obiettivi") cleanParam = "";
-    await sendObiettiviStatus(chatId, db, cleanParam || null);
-    return;
-  }
-
-  if (lower === "/saldi" || lower === "saldi" || lower === "💰 saldi e crediti") {
-    await sendSaldiStatus(chatId);
-    return;
-  }
-
-    // COMANDO /ADD: /add <giocatore> <prezzo> [squadra]
+  // COMANDO /ADD: /add <giocatore> <prezzo> [squadra]
   if (lower.startsWith("/add ")) {
     const raw = text.substring(5).trim();
     const parts = raw.split(" ");
@@ -942,14 +1017,11 @@ async function handleTelegramMessage(msg, env) {
       return;
     }
 
-    // Ultima parola o parole per la squadra
     let teamQuery = parts[parts.length - 1];
     let nameQuery = parts.slice(0, -1).join(" ");
 
-    // Se la squadra è composta da più parole (es. "Peppe Bisio")
     const matchedTeam = Object.keys(auctionState.teams).find(k => k.toLowerCase() === teamQuery.toLowerCase() || k.toLowerCase().includes(teamQuery.toLowerCase()));
     if (!matchedTeam) {
-      // Prova con ultime due parole
       if (parts.length >= 3) {
         teamQuery = parts.slice(-2).join(" ");
         nameQuery = parts.slice(0, -2).join(" ");
@@ -962,7 +1034,6 @@ async function handleTelegramMessage(msg, env) {
       return;
     }
 
-    // VERIFICA CORRISPONDENZA ASSEGNAZIONE
     const currentAssigned = auctionState.assigned[player.nome];
     if (!currentAssigned) {
       await sendMessage(chatId, `⚠️ <b>${player.nome}</b> risulta già <b>LIBERO</b> e non assegnato ad alcuna squadra!`);
@@ -977,7 +1048,6 @@ async function handleTelegramMessage(msg, env) {
       return;
     }
 
-    // Rimozione effettiva e restituzione crediti
     const pricePaid = currentAssigned.price;
     delete auctionState.assigned[player.nome];
 
@@ -997,7 +1067,7 @@ async function handleTelegramMessage(msg, env) {
     return;
   }
 
-  // 7. ASSEGNAZIONI: "mio <giocatore> <prezzo>"
+  // ASSEGNAZIONI RAPIDE: "mio <giocatore> <prezzo>"
   if (lower.startsWith("mio ")) {
     const parts = text.substring(4).trim().split(" ");
     let price = 1;
@@ -1018,7 +1088,7 @@ async function handleTelegramMessage(msg, env) {
     return;
   }
 
-  // 8. ASSEGNAZIONI: "via <giocatore> <prezzo> [squadra]"
+  // ASSEGNAZIONI RAPIDE: "via <giocatore> <prezzo> [squadra]"
   if (lower.startsWith("via ")) {
     const raw = text.substring(4).trim();
     const parts = raw.split(" ");
@@ -1044,19 +1114,18 @@ async function handleTelegramMessage(msg, env) {
       return;
     }
 
-    // Risoluzione nome squadra
     const matchedTeam = Object.keys(auctionState.teams).find(k => k.toLowerCase() === teamName.toLowerCase() || k.toLowerCase().includes(teamName.toLowerCase())) || teamName;
     const res = assignPlayer(player, matchedTeam, price);
     await sendMessage(chatId, res);
     return;
   }
 
-  // 9. RICERCA GIOCATORE / FLASH RADAR
+  // RICERCA GIOCATORE / FLASH RADAR
   await handlePlayerLookup(chatId, text, db);
 }
 
 // -------------------------------------------------------------
-// LOGICA ASSEGNAZIONE E STATO
+// MOTORE TATTICO E FUNZIONI DI SUPPORTO
 // -------------------------------------------------------------
 function assignPlayer(player, teamName, price) {
   if (auctionState.assigned[player.nome]) {
@@ -1121,27 +1190,19 @@ function resetAuction() {
   };
 }
 
-// -------------------------------------------------------------
-// 🧠 MOTORE DI TATTICA DINAMICA AVANZATA
-// -------------------------------------------------------------
 function generateTacticalAdvice(db) {
   const meKey = auctionState.teams["Noi"] ? "Noi" : (auctionState.teams["NOI"] ? "NOI" : Object.keys(auctionState.teams)[0]);
   const me = auctionState.teams[meKey] || { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
   const myBudget = me.budget;
 
-  // Analisi Attacco
-  const attAll = db.giocatori_per_reparto["ATTACCANTI"] || {};
+  const attAll = db.giocatori_per_reparto ? (db.giocatori_per_reparto["ATTACCANTI"] || {}) : {};
   const s1_att = (attAll["SLOT_1"] || []).filter(p => !auctionState.assigned[p.nome]);
-  const s2_att = (attAll["SLOT_2"] || []).filter(p => !auctionState.assigned[p.nome]);
   const iHaveTopAtt = me.players.some(p => p.ruolo === "A" && p.prezzo >= 130);
 
-  // Analisi Centrocampo
-  const ccAll = db.giocatori_per_reparto["CENTROCAMPISTI"] || {};
+  const ccAll = db.giocatori_per_reparto ? (db.giocatori_per_reparto["CENTROCAMPISTI"] || {}) : {};
   const s1_cc = (ccAll["SLOT_1"] || []).filter(p => !auctionState.assigned[p.nome]);
-  const s2_cc = (ccAll["SLOT_2"] || []).filter(p => !auctionState.assigned[p.nome]);
-  const iHaveTopCc = me.players.some(p => p.ruolo === "C" && p.prezzo >= 70);
+  const iHaveTopCc = me.players.some(p => p.ruolo === "C" && p.prezzo >= 50);
 
-  // Avversari senza top in attacco
   let oppsNoTopAtt = [];
   for (const [tName, tData] of Object.entries(auctionState.teams)) {
     if (tName === meKey) continue;
@@ -1152,7 +1213,6 @@ function generateTacticalAdvice(db) {
   }
   oppsNoTopAtt.sort((a, b) => b.budget - a.budget);
 
-  // Classifica generale budget
   const allBudgets = Object.entries(auctionState.teams).map(([name, d]) => ({ name, budget: d.budget }));
   allBudgets.sort((a, b) => b.budget - a.budget);
   const myRank = allBudgets.findIndex(t => t.name === meKey) + 1;
@@ -1163,36 +1223,33 @@ function generateTacticalAdvice(db) {
     `💰 <b>Il tuo Potere d'Acquisto:</b> <b>${myBudget} cr</b> (Sei al <b>#${myRank}° posto</b> su 10 squadre)\n`
   ];
 
-  // 1. Tattica Attacco
   lines.push(`⚽ <b>STRATEGIA ATTACCO:</b>`);
   if (iHaveTopAtt) {
     const myTop = me.players.find(p => p.ruolo === "A" && p.prezzo >= 130);
     lines.push(`• ✅ <b>Hai già il tuo 1° Slot (${myTop.nome} a ${myTop.prezzo} cr).</b>`);
-    lines.push(`• 💡 <b>Consiglio:</b> Non rilanciare su altri Slot 1 per non sprecare budget. Attendi che gli avversari si scannino e prendi un 2° slot conveniente (es. Kean, Scamacca o Raspadori) o completa centrocampo e difesa.\n`);
+    lines.push(`• 💡 <b>Consiglio:</b> Non rilanciare su altri Slot 1. Attendi che gli avversari si scannino e prendi un 2° slot conveniente o completa centrocampo e difesa.\n`);
   } else {
     lines.push(`• ⚠️ <b>Sei ancora SENZA il 1° Slot d'attacco.</b>`);
     lines.push(`• 🔴 <b>Slot 1 rimasti:</b> ${s1_att.length} (${s1_att.map(p => p.nome).join(", ") || "Finiti!"})`);
     lines.push(`• 👥 <b>Avversari diretti in cerca di Top:</b> <b>${oppsNoTopAtt.length} squadre</b> (Budget max concorrenti: ${oppsNoTopAtt.slice(0, 3).map(o => `${o.name} ${o.budget}cr`).join(", ") || "Nessuno"}).`);
 
     if (s1_att.length <= 2 && s1_att.length > 0 && oppsNoTopAtt.length >= 3) {
-      lines.push(`• 🚨 <b>ALLARME SCARSITÀ:</b> Restano solo ${s1_att.length} Super Top ma ci sono ben ${oppsNoTopAtt.length} squadre a cercarlo! L'asta su di loro andrà altissima: <b>o forzi subito ${s1_att[0].nome} oppure punta tutto su Slot 2 pesanti (Kean/Ramos/Hojlund) prima che salgano anche quelli!</b>\n`);
+      lines.push(`• 🚨 <b>ALLARME SCARSITÀ:</b> Restano solo ${s1_att.length} Super Top per ${oppsNoTopAtt.length} squadre! <b>Forza subito ${s1_att[0].nome} oppure punta tutto su Kean/Scamacca/Ramos prima che salgano anche quelli!</b>\n`);
     } else if (myBudget >= (oppsNoTopAtt[0] ? oppsNoTopAtt[0].budget : 0)) {
-      lines.push(`• 👑 <b>SEI IL PIÙ RICCO TRA CHI CERCA IL TOP!</b> Puoi decidere tu il ritmo dell'asta. Se esce ${s1_att[0] ? s1_att[0].nome : "un top"}, puoi rilanciare sicuro sapendo che nessun concorrente diretto può superarti.\n`);
+      lines.push(`• 👑 <b>SEI IL PIÙ RICCO TRA CHI CERCA IL TOP!</b> Puoi dettare tu il prezzo sapendo che nessun concorrente diretto può superarti.\n`);
     } else {
-      lines.push(`• 💡 <b>Consiglio:</b> Ci sono avversari con più crediti (${oppsNoTopAtt[0] ? oppsNoTopAtt[0].name : ""}). Non entrare in aste folli oltre 350 cr: lascia sfogare i più ricchi e prendi il secondo top o Kean/Scamacca a prezzo di saldo.\n`);
+      lines.push(`• 💡 <b>Consiglio:</b> Ci sono avversari con più crediti (${oppsNoTopAtt[0] ? oppsNoTopAtt[0].name : ""}). Lascia sfogare i più ricchi e prendi il secondo top a prezzo di saldo.\n`);
     }
   }
 
-  // 2. Tattica Centrocampo
   lines.push(`🎯 <b>STRATEGIA CENTROCAMPO:</b>`);
   if (iHaveTopCc) {
     lines.push(`• ✅ Hai già coperto un top di centrocampo. Concentrati su ottimi titolari a 10-20 cr.\n`);
   } else {
     lines.push(`• 🔴 <b>Top Centrocampo rimasti:</b> ${s1_cc.length} (${s1_cc.slice(0, 4).map(p => p.nome).join(", ") || "Finiti"}).`);
-    lines.push(`• 💡 <b>Consiglio:</b> I centrocampisti da bonus pesanti finiscono in fretta. Assicurati almeno uno tra <b>Pulisic, Zaccagni, Calhanoglu o Baturina</b> prima di rimanere con soli mediani.\n`);
+    lines.push(`• 💡 <b>Consiglio:</b> I centrocampisti da bonus pesanti finiscono in fretta. Assicurati almeno un top prima di rimanere con soli mediani.\n`);
   }
 
-  // 3. Fabbisogno per ruoli mancanti
   const missingP = Math.max(0, 3 - me.role_count.P);
   const missingD = Math.max(0, 8 - me.role_count.D);
   const missingC = Math.max(0, 8 - me.role_count.C);
@@ -1209,13 +1266,9 @@ function generateTacticalAdvice(db) {
   return lines.join("\n");
 }
 
-// -------------------------------------------------------------
-// 🎮 SIMULAZIONE REALISTICA PRE-ASTA ATTACCO (/simula)
-// -------------------------------------------------------------
 function runAttackSimulation(db) {
   resetAuction();
 
-  // Assegnazioni realistiche Portieri, Difensori, Centrocampisti
   const simData = {
     "Noi": {
       players: [
@@ -1334,10 +1387,9 @@ function runAttackSimulation(db) {
     }
   };
 
-  // Assegnazioni generiche per le squadre 6-10 (Gino, Cugino, Paolo, Andrea, Chiap)
   const otherTeams = ["Gino", "Cugino", "Paolo", "Andrea", "Chiap"];
   otherTeams.forEach((tName, idx) => {
-    const budgetSpent = 350 + (idx * 25); // Hanno speso tra 350 e 450 crediti
+    const budgetSpent = 350 + (idx * 25);
     auctionState.teams[tName] = {
       budget: 1000 - budgetSpent,
       players: [
@@ -1351,7 +1403,6 @@ function runAttackSimulation(db) {
     };
   });
 
-  // Applica simData
   for (const [tName, data] of Object.entries(simData)) {
     auctionState.teams[tName] = { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
     data.players.forEach(p => {
@@ -1363,11 +1414,8 @@ function runAttackSimulation(db) {
   }
 }
 
-// -------------------------------------------------------------
-// VISTE E REPORT TATTICI
-// -------------------------------------------------------------
 async function sendAttaccoStatus(chatId, db) {
-  const attAll = db.giocatori_per_reparto["ATTACCANTI"] || {};
+  const attAll = db.giocatori_per_reparto ? (db.giocatori_per_reparto["ATTACCANTI"] || {}) : {};
   function getFree(slotKey) {
     const list = attAll[slotKey] || [];
     return list.filter(p => !auctionState.assigned[p.nome]);
@@ -1381,7 +1429,6 @@ async function sendAttaccoStatus(chatId, db) {
   const myTeam = auctionState.teams[meKey] || { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
   const myBudget = myTeam.budget;
 
-  // Analisi di ciascuna squadra per l'attacco
   let teamDetails = [];
   let oppsNoTop = [];
 
@@ -1390,7 +1437,6 @@ async function sendAttaccoStatus(chatId, db) {
     const aCount = tData.role_count.A || 0;
     const aMissing = Math.max(0, 6 - aCount);
     
-    // Calcola posti mancanti negli altri ruoli (per sapere quanti crediti DEVE tenere da parte a 1 credito ciascuno)
     const otherMissing = Math.max(0, 3 - (tData.role_count.P || 0)) + 
                          Math.max(0, 8 - (tData.role_count.D || 0)) + 
                          Math.max(0, 8 - (tData.role_count.C || 0)) + 
@@ -1416,7 +1462,6 @@ async function sendAttaccoStatus(chatId, db) {
     });
   }
 
-  // Ordina le squadre per budget residuo
   teamDetails.sort((a, b) => b.budget - a.budget);
   oppsNoTop.sort((a, b) => b.maxBid - a.maxBid);
 
@@ -1437,11 +1482,10 @@ async function sendAttaccoStatus(chatId, db) {
     );
   });
 
-  lines.push(""); // Spazio vuoto
+  lines.push("");
 
-  // Consiglio tattico calibrato
   if (s1.length <= 2 && s1.length > 0 && oppsNoTop.length >= 3) {
-    lines.push(`🚨 <b>ALLARME SCARSITÀ:</b> Restano solo <b>${s1.length} Super Top</b> ma ben <b>${oppsNoTop.length} squadre</b> cercano il 1° slot!`);
+    lines.push(`🚨 <b>ALLARME SCARSITÀ:</b> Restano solo <b>${s1.length} Super Top</b> per <b>${oppsNoTop.length} avversari</b> senza top!`);
     lines.push(`💡 <i>I più ricchi senza top: ${oppsNoTop.slice(0, 3).map(o => `<b>${o.name}</b> (max ${o.maxBid}cr)`).join(", ")}.</i>`);
     lines.push(`👉 <b>Strategia:</b> Fai scannare ${oppsNoTop[0] ? oppsNoTop[0].name : "gli avversari"} su ${s1[0].nome} per svuotargli i crediti, e assicurati subito uno tra <b>Kean, Scamacca o Hojlund</b>!`);
   } else if (myBudget >= (oppsNoTop[0] ? oppsNoTop[0].budget : 0)) {
@@ -1454,7 +1498,7 @@ async function sendAttaccoStatus(chatId, db) {
 }
 
 async function sendCentrocampoStatus(chatId, db) {
-  const ccAll = db.giocatori_per_reparto["CENTROCAMPISTI"] || {};
+  const ccAll = db.giocatori_per_reparto ? (db.giocatori_per_reparto["CENTROCAMPISTI"] || {}) : {};
   function getFree(slotKey) {
     const list = ccAll[slotKey] || [];
     return list.filter(p => !auctionState.assigned[p.nome]);
@@ -1536,7 +1580,7 @@ async function sendCentrocampoStatus(chatId, db) {
 }
 
 async function sendDifesaStatus(chatId, db) {
-  const dAll = db.giocatori_per_reparto["DIFENSORI"] || {};
+  const dAll = db.giocatori_per_reparto ? (db.giocatori_per_reparto["DIFENSORI"] || {}) : {};
   function getFree(slotKey) {
     return (dAll[slotKey] || []).filter(p => !auctionState.assigned[p.nome]);
   }
@@ -1552,7 +1596,7 @@ async function sendDifesaStatus(chatId, db) {
 }
 
 async function sendPortieriStatus(chatId, db) {
-  const pAll = db.giocatori_per_reparto["PORTIERI"] || {};
+  const pAll = db.giocatori_per_reparto ? (db.giocatori_per_reparto["PORTIERI"] || {}) : {};
   function getFree(slotKey) {
     return (pAll[slotKey] || []).filter(p => !auctionState.assigned[p.nome]);
   }
@@ -1585,7 +1629,6 @@ async function sendObiettiviStatus(chatId, db, roleFilter = null) {
     { key: "GRIGIO_SCOMMESSINA", label: "SCOMMESSINE", icon: "⚪" }
   ];
 
-  // Raccogliamo i dati per Ruolo e Categoria
   const dataByRole = { P: {}, D: {}, C: {}, A: {} };
   categories.forEach(cat => {
     const list = ob[cat.key] || [];
@@ -1596,7 +1639,6 @@ async function sendObiettiviStatus(chatId, db, roleFilter = null) {
     });
   });
 
-  // Se è stato specificato un filtro ruolo
   let activeRoles = Object.keys(roleMap);
   if (roleFilter) {
     const cleanFilter = roleFilter.toLowerCase().trim();
@@ -1731,7 +1773,6 @@ async function handlePlayerLookup(chatId, text, db) {
   const maxRole = (p.ruolo === "P" ? 3 : (p.ruolo === "D" || p.ruolo === "C" ? 8 : 6));
   const myRoleMissing = Math.max(0, maxRole - (me.role_count[p.ruolo] || 0));
 
-  // Analisi di TUTTI gli avversari per il ruolo del giocatore
   let aboveMeNoTop = [];
   let belowMeNoTop = [];
   let completedRole = [];
@@ -1740,7 +1781,6 @@ async function handlePlayerLookup(chatId, text, db) {
   for (const [tName, tData] of Object.entries(auctionState.teams)) {
     if (tName === meKey) continue;
     
-    // Soglia top per ruolo (A: >=130, C: >=50, D: >=35, P: >=40)
     let topThreshold = 130;
     if (p.ruolo === "C") topThreshold = 50;
     if (p.ruolo === "D") topThreshold = 35;
@@ -1782,7 +1822,6 @@ async function handlePlayerLookup(chatId, text, db) {
   alreadyHaveTop.sort((a, b) => b.budget - a.budget);
   completedRole.sort((a, b) => b.budget - a.budget);
 
-  // Stima Prezzo Probabile d'Asta
   let estimatedMin = 1;
   let estimatedMax = 5;
   if (p.ruolo === "A") {
@@ -1836,7 +1875,6 @@ async function handlePlayerLookup(chatId, text, db) {
     }
   }
 
-  // Costruzione della sezione Tattica e Contendenti
   let tacticalSection = "";
   if (!auctionState.assigned[p.nome]) {
     tacticalSection = `\n\n🎯 <b>SIMULAZIONE & TATTICA D'ASTA:</b>` +
@@ -1848,7 +1886,6 @@ async function handlePlayerLookup(chatId, text, db) {
     if (totalNeedingRole === 0 && myRoleMissing === 0) {
       tacticalSection += `⚪ <i>Tutte le 10 squadre (inclusa la tua) hanno già COMPLETATO gli slot per questo reparto (${maxRole}/${maxRole})!</i>\n`;
     } else {
-      // 1. Quelli SOPRA di te senza top
       if (aboveMeNoTop.length > 0) {
         tacticalSection += `🔴 <b>SOPRA DI TE CON SLOT LIBERI (${aboveMeNoTop.length} squadre):</b>\n`;
         aboveMeNoTop.forEach((t, i) => {
@@ -1858,7 +1895,6 @@ async function handlePlayerLookup(chatId, text, db) {
         tacticalSection += `👑 <b>SEI AL 1° POSTO! Nessun avversario a caccia di [${p.ruolo}] ha più crediti di te (${myBudget} cr).</b>\n`;
       }
 
-      // 2. Quelli SOTTO di te senza top
       if (belowMeNoTop.length > 0) {
         tacticalSection += `\n🟡 <b>SOTTO DI TE CON SLOT LIBERI (${belowMeNoTop.length} squadre):</b>\n`;
         belowMeNoTop.forEach((t, i) => {
@@ -1866,18 +1902,15 @@ async function handlePlayerLookup(chatId, text, db) {
         });
       }
 
-      // 3. Quelli che hanno già il top nel reparto
       if (alreadyHaveTop.length > 0) {
         tacticalSection += `\n🔵 <i>Hanno già il Top ma cercano gregari: ${alreadyHaveTop.map(t => `${t.name} (${t.budget}cr, ${t.roleCount}/${maxRole})`).join(", ")}</i>\n`;
       }
 
-      // 4. Quelli che hanno completato il reparto
       if (completedRole.length > 0) {
         tacticalSection += `\n⚪ <i>Reparto completato (${maxRole}/${maxRole}): ${completedRole.map(t => `${t.name} (${t.budget}cr)`).join(", ")}</i>\n`;
       }
     }
 
-    // Trappola / Bluff
     let targetName = "";
     let reasonText = "";
 
