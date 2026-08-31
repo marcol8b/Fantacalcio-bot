@@ -274,6 +274,108 @@ async function handleTelegramMessage(msg, env) {
     return;
   }
 
+    // COMANDO /ADD: /add <giocatore> <prezzo> [squadra]
+  if (lower.startsWith("/add ")) {
+    const raw = text.substring(5).trim();
+    const parts = raw.split(" ");
+    if (parts.length < 2) {
+      await sendMessage(chatId, "⚠️ Formato non valido. Usa: <code>/add giocatore prezzo squadra</code> (es: <code>/add kean 140 Noi</code> o <code>/add lautaro 320 Peppe</code>).");
+      return;
+    }
+
+    let price = 1;
+    let teamName = "Noi";
+    let nameParts = [];
+
+    for (let i = 0; i < parts.length; i++) {
+      if (!isNaN(parseInt(parts[i]))) {
+        price = parseInt(parts[i]);
+        if (i + 1 < parts.length) {
+          teamName = parts.slice(i + 1).join(" ");
+        }
+        break;
+      } else {
+        nameParts.push(parts[i]);
+      }
+    }
+
+    const nameQuery = nameParts.length > 0 ? nameParts.join(" ") : parts[0];
+    const player = findBestPlayer(nameQuery, db.tutti_i_giocatori);
+    if (!player) {
+      await sendMessage(chatId, `❌ Calciatore "<b>${nameQuery}</b>" non trovato nel listone.`);
+      return;
+    }
+
+    const matchedTeam = Object.keys(auctionState.teams).find(k => k.toLowerCase() === teamName.toLowerCase() || k.toLowerCase().includes(teamName.toLowerCase())) || teamName;
+    const res = assignPlayer(player, matchedTeam, price);
+    await sendMessage(chatId, res);
+    return;
+  }
+
+  // COMANDO /REM: /rem <giocatore> <squadra> (SOLO SE C'È CORRISPONDENZA)
+  if (lower.startsWith("/rem ")) {
+    const raw = text.substring(5).trim();
+    const parts = raw.split(" ");
+    if (parts.length < 2) {
+      await sendMessage(chatId, "⚠️ Formato non valido. Usa: <code>/rem giocatore squadra</code> (es: <code>/rem kean Noi</code> o <code>/rem lautaro Peppe</code>).");
+      return;
+    }
+
+    // Ultima parola o parole per la squadra
+    let teamQuery = parts[parts.length - 1];
+    let nameQuery = parts.slice(0, -1).join(" ");
+
+    // Se la squadra è composta da più parole (es. "Peppe Bisio")
+    const matchedTeam = Object.keys(auctionState.teams).find(k => k.toLowerCase() === teamQuery.toLowerCase() || k.toLowerCase().includes(teamQuery.toLowerCase()));
+    if (!matchedTeam) {
+      // Prova con ultime due parole
+      if (parts.length >= 3) {
+        teamQuery = parts.slice(-2).join(" ");
+        nameQuery = parts.slice(0, -2).join(" ");
+      }
+    }
+
+    const player = findBestPlayer(nameQuery, db.tutti_i_giocatori);
+    if (!player) {
+      await sendMessage(chatId, `❌ Calciatore "<b>${nameQuery}</b>" non trovato nel listone.`);
+      return;
+    }
+
+    // VERIFICA CORRISPONDENZA ASSEGNAZIONE
+    const currentAssigned = auctionState.assigned[player.nome];
+    if (!currentAssigned) {
+      await sendMessage(chatId, `⚠️ <b>${player.nome}</b> risulta già <b>LIBERO</b> e non assegnato ad alcuna squadra!`);
+      return;
+    }
+
+    const actualTeam = currentAssigned.team;
+    const targetTeam = Object.keys(auctionState.teams).find(k => k.toLowerCase() === teamQuery.toLowerCase() || k.toLowerCase().includes(teamQuery.toLowerCase())) || teamQuery;
+
+    if (actualTeam.toLowerCase() !== targetTeam.toLowerCase() && !actualTeam.toLowerCase().includes(targetTeam.toLowerCase()) && !targetTeam.toLowerCase().includes(actualTeam.toLowerCase())) {
+      await sendMessage(chatId, `❌ <b>CORRISPONDENZA FALLITA!</b>\n<b>${player.nome}</b> NON è presente nella rosa di <b>${targetTeam}</b>, ma risulta assegnato a <b>${actualTeam}</b> (per ${currentAssigned.price} cr).\n\nPer rimuoverlo usa: <code>/rem ${player.nome} ${actualTeam}</code>`);
+      return;
+    }
+
+    // Rimozione effettiva e restituzione crediti
+    const pricePaid = currentAssigned.price;
+    delete auctionState.assigned[player.nome];
+
+    const teamObj = auctionState.teams[actualTeam];
+    if (teamObj) {
+      teamObj.budget += pricePaid;
+      teamObj.players = teamObj.players.filter(p => p.nome !== player.nome);
+      teamObj.role_count[player.ruolo] = Math.max(0, (teamObj.role_count[player.ruolo] || 1) - 1);
+    }
+
+    auctionState.history = auctionState.history.filter(h => h.player.nome !== player.nome);
+
+    await sendMessage(chatId, `🗑️ <b>RIMOZIONE CONFERMATA!</b>\n` +
+                             `• Calciatore: <b>${player.nome}</b> (${player.ruolo}) rimosso dalla rosa di <b>${actualTeam}</b>.\n` +
+                             `• 💰 Restituiti <b>${pricePaid} cr</b> a ${actualTeam} (Nuovo saldo: <b>${teamObj ? teamObj.budget : ''} cr</b>).\n` +
+                             `• 🟢 <b>${player.nome}</b> è tornato nuovamente <b>LIBERO</b> nel listone.`);
+    return;
+  }
+
   // 7. ASSEGNAZIONI: "mio <giocatore> <prezzo>"
   if (lower.startsWith("mio ")) {
     const parts = text.substring(4).trim().split(" ");
@@ -846,24 +948,62 @@ async function sendPortieriStatus(chatId, db) {
 
 async function sendObiettiviStatus(chatId, db) {
   const ob = db.obiettivi || {};
-  function formatList(list) {
-    if (!list || list.length === 0) return "<i>Nessuno</i>";
-    return list.map(item => {
+  const meKey = auctionState.teams["Noi"] ? "Noi" : (auctionState.teams["NOI"] ? "NOI" : Object.keys(auctionState.teams)[0]);
+
+  function formatCategory(list, catName, icon) {
+    if (!list || list.length === 0) return `${icon} <b>${catName}:</b> <i>Nessuno</i>\n`;
+
+    let freeCount = 0;
+    let myCount = 0;
+    let oppCount = 0;
+
+    // Raggruppa per ruolo P, D, C, A
+    const byRole = { P: [], D: [], C: [], A: [] };
+
+    list.forEach(item => {
       const isTaken = auctionState.assigned[item.nome];
-      const bStr = item.budget_target ? ` [${item.budget_target} cr]` : "";
-      if (isTaken) {
-        return `<s>${item.nome} (${item.ruolo})</s> ➔ <i>${isTaken.team} (${isTaken.price} cr)</i>`;
+      const bStr = item.budget_target ? ` [Target: ${item.budget_target}cr]` : "";
+      
+      let statusStr = "";
+      if (!isTaken) {
+        freeCount++;
+        statusStr = `• <b>${item.nome}</b> (${item.squadra})${bStr} ➔ 🟢 <b>LIBERO</b>`;
+      } else if (isTaken.team === meKey || isTaken.team === "Noi" || isTaken.team === "NOI") {
+        myCount++;
+        statusStr = `• <b>${item.nome}</b> ➔ ✅ <b>TUO (${isTaken.price} cr)</b>`;
+      } else {
+        oppCount++;
+        statusStr = `• <s>${item.nome}</s> ➔ ❌ <i>${isTaken.team} (${isTaken.price} cr)</i>`;
       }
-      return `• <b>${item.nome}</b> (${item.ruolo} - ${item.squadra})${bStr}`;
-    }).join("\n");
+
+      if (byRole[item.ruolo]) byRole[item.ruolo].push(statusStr);
+      else byRole["A"].push(statusStr);
+    });
+
+    let out = `${icon} <b>${catName}</b> (Liberi: <b>${freeCount}</b> | Tuoi: <b>${myCount}</b> | Andati: <b>${oppCount}</b>)\n`;
+    
+    if (byRole.P.length > 0) {
+      out += `  🧤 <b>Portieri:</b>\n` + byRole.P.map(s => `     ${s}`).join("\n") + "\n";
+    }
+    if (byRole.D.length > 0) {
+      out += `  🛡️ <b>Difensori:</b>\n` + byRole.D.map(s => `     ${s}`).join("\n") + "\n";
+    }
+    if (byRole.C.length > 0) {
+      out += `  🎯 <b>Centrocampisti:</b>\n` + byRole.C.map(s => `     ${s}`).join("\n") + "\n";
+    }
+    if (byRole.A.length > 0) {
+      out += `  ⚽ <b>Attaccanti:</b>\n` + byRole.A.map(s => `     ${s}`).join("\n") + "\n";
+    }
+
+    return out;
   }
 
-  let text = `⭐ <b>I TUOI OBIETTIVI PERSONALI</b>\n` +
-             `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-             `🟡 <b>MUST HAVE (Giallo):</b>\n${formatList(ob.GIALLO_MUST_HAVE)}\n\n` +
-             `🌸 <b>1° SLOT MUST HAVE (Rosa):</b>\n${formatList(ob.ROSA_PRIMO_SLOT_MUST_HAVE)}\n\n` +
-             `🔵 <b>OTTIMI TITOLARI (Blu):</b>\n${formatList(ob.BLU_OTTIMO_TITOLARE)}\n\n` +
-             `⚪ <b>SCOMMESSINE (Grigio):</b>\n${formatList(ob.GRIGIO_SCOMMESSINA)}`;
+  let text = `⭐ <b>I TUOI OBIETTIVI PERSONALI (RUOLO PER RUOLO)</b>\n` +
+             `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+             formatCategory(ob.GIALLO_MUST_HAVE, "MUST HAVE (Giallo)", "🟡") + "\n" +
+             formatCategory(ob.ROSA_PRIMO_SLOT_MUST_HAVE, "1° SLOT MUST HAVE (Rosa)", "🌸") + "\n" +
+             formatCategory(ob.BLU_OTTIMO_TITOLARE, "OTTIMI TITOLARI (Blu)", "🔵") + "\n" +
+             formatCategory(ob.GRIGIO_SCOMMESSINA, "SCOMMESSINE (Grigio)", "⚪");
 
   await sendMessage(chatId, text, getRepartoKeyboard());
 }
