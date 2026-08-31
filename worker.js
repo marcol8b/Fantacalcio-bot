@@ -8,18 +8,18 @@ const GROQ_API_KEY = ""; // Inserisci la tua chiave Groq per i vocali (gratis su
 // Stato in-memory dell'asta
 let auctionState = {
   teams: {
-    "NOI": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
-    "Squadra 2": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
-    "Squadra 3": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
-    "Squadra 4": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
-    "Squadra 5": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
-    "Squadra 6": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
-    "Squadra 7": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
-    "Squadra 8": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
-    "Squadra 9": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
-    "Squadra 10": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } }
+    "Noi": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+    "Peppe": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+    "Cece": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+    "Zio": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+    "Nero": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+    "Gino": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+    "Cugino": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+    "Paolo": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+    "Andrea": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } },
+    "Chiap": { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } }
   },
-  assigned: {}, // { "Martinez L.": { team: "NOI", price: 380 } }
+  assigned: {},
   history: []
 };
 
@@ -118,23 +118,33 @@ async function handleTelegramMessage(msg, env) {
   }
 
   
-  // IMPOSTA SQUADRE: /squadre Nome1, Nome2, Nome3...
-  if (lower.startsWith("/squadre ")) {
-    const rawList = text.substring(9).trim();
-    const names = rawList.split(/[,\n]/).map(n => n.trim()).filter(n => n.length > 0);
+    // GESTIONE SQUADRE: /squadre oppure squadre oppure /squadre Nome1, Nome2...
+  if (lower.startsWith("/squadre") || lower.startsWith("squadre")) {
+    let cleanParam = text.replace(/^\/?squadre(@[a-zA-Z0-9_]+)?/i, "").trim();
+    
+    // Se non ha passato argomenti, mostra la lista attuale
+    if (!cleanParam) {
+      const currentList = Object.keys(auctionState.teams).map((t, idx) => `${idx + 1}. <b>${t}</b> (${auctionState.teams[t].budget} cr)`).join("\n");
+      await sendMessage(chatId, `👥 <b>SQUADRE ATTUALI PARTECIPANTI (Lega a 10):</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${currentList}\n\n💡 <i>Per cambiare i nomi, scrivi:</i>\n<code>/squadre Noi, Peppe, Cece, Zio, Nero, Gino, Cugino, Paolo, Andrea, Chiap</code>`);
+      return;
+    }
+
+    const names = cleanParam.split(/[,\n]/).map(n => n.trim()).filter(n => n.length > 0);
     if (names.length < 2) {
       await sendMessage(chatId, "⚠️ Inserisci almeno 2 o più squadre separate da virgola (es: <code>/squadre Noi, Peppe, Cece, Zio, Nero, Gino, Cugino, Paolo, Andrea, Chiap</code>).");
       return;
     }
+    
     auctionState.teams = {};
     names.forEach(n => {
       auctionState.teams[n] = { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
     });
-    // Se "NOI" non è presente tra i nomi, la prima squadra è considerata NOI
-    if (!auctionState.teams["NOI"] && names.length > 0) {
-      auctionState.teams["NOI"] = { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
+    if (!auctionState.teams["Noi"] && !auctionState.teams["NOI"] && names.length > 0) {
+      auctionState.teams["Noi"] = { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
     }
-    await sendMessage(chatId, `✅ <b>Impostate ${Object.keys(auctionState.teams).length} Squadre a 1000 crediti:</b>\n` + Object.keys(auctionState.teams).map(t => `• <b>${t}</b>`).join("\n"));
+    
+    const outList = Object.keys(auctionState.teams).map(t => `• <b>${t}</b>`).join("\n");
+    await sendMessage(chatId, `✅ <b>Impostate con successo ${Object.keys(auctionState.teams).length} Squadre (1000 crediti):</b>\n${outList}`);
     return;
   }
 
