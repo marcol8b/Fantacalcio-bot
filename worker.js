@@ -144,6 +144,18 @@ async function handleTelegramMessage(msg, env) {
   }
 
   // 2. RESET ASTA
+    if (lower === "/simula" || lower === "/simula_attacco" || lower === "simula" || lower === "🎮 simula pre-asta attacco") {
+    runAttackSimulation(db);
+    const textOut = `🎮 <b>SIMULAZIONE PRE-ASTA ATTACCO ATTIVATA!</b>\n` +
+                    `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `Tutte le 10 squadre hanno completato Portieri, Difensori e Centrocampisti.\n\n` +
+                    `💰 <b>SITUAZIONE CREDITI PER L'ATTACCO:</b>\n` +
+                    Object.entries(auctionState.teams).map(([t, d]) => `• <b>${t}</b>${(t==='Noi'||t==='NOI')?' 👑 (TU)':''}: <b>${d.budget} cr</b> rimasti (0/6 attaccanti)`).join("\n") +
+                    `\n\n👉 <i>Tutti gli Attaccanti (Slot 1, 2, 3, 4) sono LIBERI! Clicca su <b>[⚽ Attacco]</b> o scrivi <b>kean</b> o <b>vlahovic</b> per testare la strategia!</i>`;
+    await sendMessage(chatId, textOut, getRepartoKeyboard());
+    return;
+  }
+
   if (lower === "/reset" || lower === "reset" || lower === "🔄 reset asta" || lower === "reset asta") {
     resetAuction();
     await sendMessage(chatId, "🔄 <b>Asta Resettata!</b>\nTutte le 10 squadre sono state ripristinate a <b>1000 crediti</b> e tutti i 517 giocatori sono liberi.");
@@ -472,6 +484,160 @@ function generateTacticalAdvice(db) {
   }
 
   return lines.join("\n");
+}
+
+// -------------------------------------------------------------
+// 🎮 SIMULAZIONE REALISTICA PRE-ASTA ATTACCO (/simula)
+// -------------------------------------------------------------
+function runAttackSimulation(db) {
+  resetAuction();
+
+  // Assegnazioni realistiche Portieri, Difensori, Centrocampisti
+  const simData = {
+    "Noi": {
+      players: [
+        { nome: "Falcone", ruolo: "P", prezzo: 15 },
+        { nome: "Butez", ruolo: "P", prezzo: 12 },
+        { nome: "Bleve", ruolo: "P", prezzo: 1 },
+        { nome: "Bastoni", ruolo: "D", prezzo: 55 },
+        { nome: "Wesley", ruolo: "D", prezzo: 50 },
+        { nome: "Gila", ruolo: "D", prezzo: 18 },
+        { nome: "Valeri", ruolo: "D", prezzo: 8 },
+        { nome: "Dragusin", ruolo: "D", prezzo: 5 },
+        { nome: "Norton-Cuffy", ruolo: "D", prezzo: 3 },
+        { nome: "Badiashile", ruolo: "D", prezzo: 2 },
+        { nome: "Marcandalli", ruolo: "D", prezzo: 1 },
+        { nome: "Pulisic", ruolo: "C", prezzo: 115 },
+        { nome: "Baturina", ruolo: "C", prezzo: 45 },
+        { nome: "Fazzini", ruolo: "C", prezzo: 12 },
+        { nome: "Frendrup", ruolo: "C", prezzo: 8 },
+        { nome: "Gaetano", ruolo: "C", prezzo: 6 },
+        { nome: "Diouf", ruolo: "C", prezzo: 4 },
+        { nome: "Vergara", ruolo: "C", prezzo: 2 },
+        { nome: "Calò", ruolo: "C", prezzo: 1 }
+      ]
+    },
+    "Peppe": {
+      players: [
+        { nome: "Carnesecchi", ruolo: "P", prezzo: 45 },
+        { nome: "Caprile", ruolo: "P", prezzo: 8 },
+        { nome: "Mandas", ruolo: "P", prezzo: 1 },
+        { nome: "Dimarco", ruolo: "D", prezzo: 65 },
+        { nome: "Bisseck", ruolo: "D", prezzo: 22 },
+        { nome: "Rrahmani", ruolo: "D", prezzo: 18 },
+        { nome: "Miranda J.", ruolo: "D", prezzo: 8 },
+        { nome: "Monterisi", ruolo: "D", prezzo: 2 },
+        { nome: "Mangas", ruolo: "D", prezzo: 1 },
+        { nome: "Ahanor", ruolo: "D", prezzo: 1 },
+        { nome: "Antov", ruolo: "D", prezzo: 1 },
+        { nome: "Calhanoglu", ruolo: "C", prezzo: 120 },
+        { nome: "Ederson D.S.", ruolo: "C", prezzo: 48 },
+        { nome: "McKennie", ruolo: "C", prezzo: 20 },
+        { nome: "Cristante", ruolo: "C", prezzo: 10 },
+        { nome: "Busio", ruolo: "C", prezzo: 8 },
+        { nome: "Ekkelenkamp", ruolo: "C", prezzo: 4 },
+        { nome: "Ghedjemis", ruolo: "C", prezzo: 2 },
+        { nome: "Schmid", ruolo: "C", prezzo: 1 }
+      ]
+    },
+    "Cece": {
+      players: [
+        { nome: "Svilar", ruolo: "P", prezzo: 40 },
+        { nome: "Martinez Jo.", ruolo: "P", prezzo: 10 },
+        { nome: "Contini", ruolo: "P", prezzo: 1 },
+        { nome: "Bremer", ruolo: "D", prezzo: 60 },
+        { nome: "Kalulu", ruolo: "D", prezzo: 25 },
+        { nome: "Molina N.", ruolo: "D", prezzo: 15 },
+        { nome: "Couto", ruolo: "D", prezzo: 12 },
+        { nome: "Chalobah T.", ruolo: "D", prezzo: 8 },
+        { nome: "Bernasconi", ruolo: "D", prezzo: 4 },
+        { nome: "Zappacosta", ruolo: "D", prezzo: 10 },
+        { nome: "N'Dicka", ruolo: "D", prezzo: 15 },
+        { nome: "Zaccagni", ruolo: "C", prezzo: 110 },
+        { nome: "Frattesi", ruolo: "C", prezzo: 55 },
+        { nome: "Samardzic", ruolo: "C", prezzo: 30 },
+        { nome: "Baldanzi", ruolo: "C", prezzo: 12 },
+        { nome: "Casadei", ruolo: "C", prezzo: 8 },
+        { nome: "Taylor K.", ruolo: "C", prezzo: 5 },
+        { nome: "Alajbegovic", ruolo: "C", prezzo: 4 },
+        { nome: "Adopo", ruolo: "C", prezzo: 1 }
+      ]
+    },
+    "Zio": {
+      players: [
+        { nome: "Maignan", ruolo: "P", prezzo: 48 },
+        { nome: "Christensen O.", ruolo: "P", prezzo: 2 },
+        { nome: "Daffara", ruolo: "P", prezzo: 1 },
+        { nome: "Mancini", ruolo: "D", prezzo: 30 },
+        { nome: "Pavlovic", ruolo: "D", prezzo: 22 },
+        { nome: "Solet", ruolo: "D", prezzo: 18 },
+        { nome: "Ramon", ruolo: "D", prezzo: 8 },
+        { nome: "Stankovic F.", ruolo: "D", prezzo: 4 },
+        { nome: "Kristensen T.", ruolo: "D", prezzo: 2 },
+        { nome: "Tiago Gabriel", ruolo: "D", prezzo: 1 },
+        { nome: "Amey", ruolo: "D", prezzo: 1 },
+        { nome: "Barella", ruolo: "C", prezzo: 65 },
+        { nome: "Zaniolo", ruolo: "C", prezzo: 45 },
+        { nome: "Mora", ruolo: "C", prezzo: 20 },
+        { nome: "Gudmundsson A.", ruolo: "C", prezzo: 35 },
+        { nome: "Santos A.", ruolo: "C", prezzo: 15 },
+        { nome: "De Bruyne", ruolo: "C", prezzo: 12 },
+        { nome: "Akinsanmiro", ruolo: "C", prezzo: 2 },
+        { nome: "Adzic", ruolo: "C", prezzo: 2 }
+      ]
+    },
+    "Nero": {
+      players: [
+        { nome: "Di Gregorio", ruolo: "P", prezzo: 45 },
+        { nome: "Corvi", ruolo: "P", prezzo: 1 },
+        { nome: "Okoye", ruolo: "P", prezzo: 10 },
+        { nome: "Akanji", ruolo: "D", prezzo: 35 },
+        { nome: "Badiashile", ruolo: "D", prezzo: 15 },
+        { nome: "Alhassane", ruolo: "D", prezzo: 2 },
+        { nome: "Akpoguma", ruolo: "D", prezzo: 1 },
+        { nome: "Abankwah", ruolo: "D", prezzo: 1 },
+        { nome: "Antov", ruolo: "D", prezzo: 1 },
+        { nome: "Arizala", ruolo: "D", prezzo: 1 },
+        { nome: "Aurelio", ruolo: "D", prezzo: 1 },
+        { nome: "Paz N.", ruolo: "C", prezzo: 85 },
+        { nome: "Ferguson", ruolo: "C", prezzo: 40 },
+        { nome: "Fabbian", ruolo: "C", prezzo: 25 },
+        { nome: "Pessina", ruolo: "C", prezzo: 15 },
+        { nome: "Pasalic", ruolo: "C", prezzo: 20 },
+        { nome: "Colpani", ruolo: "C", prezzo: 25 },
+        { nome: "Addai", ruolo: "C", prezzo: 2 },
+        { nome: "Aboukhlal", ruolo: "C", prezzo: 3 }
+      ]
+    }
+  };
+
+  // Assegnazioni generiche per le squadre 6-10 (Gino, Cugino, Paolo, Andrea, Chiap)
+  const otherTeams = ["Gino", "Cugino", "Paolo", "Andrea", "Chiap"];
+  otherTeams.forEach((tName, idx) => {
+    const budgetSpent = 350 + (idx * 25); // Hanno speso tra 350 e 450 crediti
+    auctionState.teams[tName] = {
+      budget: 1000 - budgetSpent,
+      players: [
+        { nome: `Portiere_${tName}`, ruolo: "P", prezzo: 35 },
+        { nome: `Difesa_${tName}_1`, ruolo: "D", prezzo: 30 },
+        { nome: `Difesa_${tName}_2`, ruolo: "D", prezzo: 20 },
+        { nome: `Centrocampo_${tName}_1`, ruolo: "C", prezzo: 60 },
+        { nome: `Centrocampo_${tName}_2`, ruolo: "C", prezzo: 40 }
+      ],
+      role_count: { P: 3, D: 8, C: 8, A: 0 }
+    };
+  });
+
+  // Applica simData
+  for (const [tName, data] of Object.entries(simData)) {
+    auctionState.teams[tName] = { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
+    data.players.forEach(p => {
+      auctionState.teams[tName].budget -= p.prezzo;
+      auctionState.teams[tName].players.push(p);
+      auctionState.teams[tName].role_count[p.ruolo] = (auctionState.teams[tName].role_count[p.ruolo] || 0) + 1;
+      auctionState.assigned[p.nome] = { team: tName, price: p.prezzo, player: p };
+    });
+  }
 }
 
 // -------------------------------------------------------------
