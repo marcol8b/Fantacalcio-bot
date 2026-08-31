@@ -950,62 +950,74 @@ async function sendObiettiviStatus(chatId, db) {
   const ob = db.obiettivi || {};
   const meKey = auctionState.teams["Noi"] ? "Noi" : (auctionState.teams["NOI"] ? "NOI" : Object.keys(auctionState.teams)[0]);
 
-  function formatCategory(list, catName, icon) {
-    if (!list || list.length === 0) return `${icon} <b>${catName}:</b> <i>Nessuno</i>\n`;
+  // Creiamo una struttura per RUOLO -> CATEGORIA
+  const roleMap = {
+    "P": { name: "PORTIERI", icon: "🧤" },
+    "D": { name: "DIFENSORI", icon: "🛡️" },
+    "C": { name: "CENTROCAMPISTI", icon: "🎯" },
+    "A": { name: "ATTACCANTI", icon: "⚽" }
+  };
 
-    let freeCount = 0;
-    let myCount = 0;
-    let oppCount = 0;
+  const categories = [
+    { key: "GIALLO_MUST_HAVE", label: "MUST HAVE", icon: "🟡" },
+    { key: "ROSA_PRIMO_SLOT_MUST_HAVE", label: "1° SLOT MUST HAVE", icon: "🌸" },
+    { key: "BLU_OTTIMO_TITOLARE", label: "OTTIMI TITOLARI", icon: "🔵" },
+    { key: "GRIGIO_SCOMMESSINA", label: "SCOMMESSINE", icon: "⚪" }
+  ];
 
-    // Raggruppa per ruolo P, D, C, A
-    const byRole = { P: [], D: [], C: [], A: [] };
+  // Raccogliamo tutti i giocatori obiettivo divisi per Ruolo e poi per Categoria
+  const dataByRole = { P: {}, D: {}, C: {}, A: {} };
+  
+  categories.forEach(cat => {
+    const list = ob[cat.key] || [];
+    list.forEach(p => {
+      const r = p.ruolo || "A";
+      if (!dataByRole[r][cat.key]) dataByRole[r][cat.key] = [];
+      dataByRole[r][cat.key].push(p);
+    });
+  });
 
-    list.forEach(item => {
-      const isTaken = auctionState.assigned[item.nome];
-      const bStr = item.budget_target ? ` [Target: ${item.budget_target}cr]` : "";
-      
-      let statusStr = "";
-      if (!isTaken) {
-        freeCount++;
-        statusStr = `• <b>${item.nome}</b> (${item.squadra})${bStr} ➔ 🟢 <b>LIBERO</b>`;
-      } else if (isTaken.team === meKey || isTaken.team === "Noi" || isTaken.team === "NOI") {
-        myCount++;
-        statusStr = `• <b>${item.nome}</b> ➔ ✅ <b>TUO (${isTaken.price} cr)</b>`;
-      } else {
-        oppCount++;
-        statusStr = `• <s>${item.nome}</s> ➔ ❌ <i>${isTaken.team} (${isTaken.price} cr)</i>`;
+  let lines = [
+    `⭐ <b>I TUOI OBIETTIVI DIVISI PER REPARTO</b>`,
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`
+  ];
+
+  for (const [rCode, rInfo] of Object.entries(roleMap)) {
+    let roleBlock = [];
+    let freeTotal = 0;
+    let myTotal = 0;
+    let oppTotal = 0;
+
+    categories.forEach(cat => {
+      const players = dataByRole[rCode][cat.key] || [];
+      if (players.length > 0) {
+        let catLines = [];
+        players.forEach(p => {
+          const isTaken = auctionState.assigned[p.nome];
+          const bStr = p.budget_target ? ` [Target: ${p.budget_target}cr]` : "";
+
+          if (!isTaken) {
+            freeTotal++;
+            catLines.push(`     • <b>${p.nome}</b> (${p.squadra})${bStr} ➔ 🟢 <b>LIBERO</b>`);
+          } else if (isTaken.team === meKey || isTaken.team === "Noi" || isTaken.team === "NOI") {
+            myTotal++;
+            catLines.push(`     • <b>${p.nome}</b> ➔ ✅ <b>TUO (${isTaken.price} cr)</b>`);
+          } else {
+            oppTotal++;
+            catLines.push(`     • <s>${p.nome}</s> ➔ ❌ <i>${isTaken.team} (${isTaken.price} cr)</i>`);
+          }
+        });
+
+        roleBlock.push(`  ${cat.icon} <b>${cat.label}:</b>\n` + catLines.join("\n"));
       }
-
-      if (byRole[item.ruolo]) byRole[item.ruolo].push(statusStr);
-      else byRole["A"].push(statusStr);
     });
 
-    let out = `${icon} <b>${catName}</b> (Liberi: <b>${freeCount}</b> | Tuoi: <b>${myCount}</b> | Andati: <b>${oppCount}</b>)\n`;
-    
-    if (byRole.P.length > 0) {
-      out += `  🧤 <b>Portieri:</b>\n` + byRole.P.map(s => `     ${s}`).join("\n") + "\n";
+    if (roleBlock.length > 0) {
+      lines.push(`${rInfo.icon} <b>${rInfo.name}</b> (🟢 ${freeTotal} Liberi | ✅ ${myTotal} Tuoi | ❌ ${oppTotal} Andati)\n` + roleBlock.join("\n\n") + "\n");
     }
-    if (byRole.D.length > 0) {
-      out += `  🛡️ <b>Difensori:</b>\n` + byRole.D.map(s => `     ${s}`).join("\n") + "\n";
-    }
-    if (byRole.C.length > 0) {
-      out += `  🎯 <b>Centrocampisti:</b>\n` + byRole.C.map(s => `     ${s}`).join("\n") + "\n";
-    }
-    if (byRole.A.length > 0) {
-      out += `  ⚽ <b>Attaccanti:</b>\n` + byRole.A.map(s => `     ${s}`).join("\n") + "\n";
-    }
-
-    return out;
   }
 
-  let text = `⭐ <b>I TUOI OBIETTIVI PERSONALI (RUOLO PER RUOLO)</b>\n` +
-             `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-             formatCategory(ob.GIALLO_MUST_HAVE, "MUST HAVE (Giallo)", "🟡") + "\n" +
-             formatCategory(ob.ROSA_PRIMO_SLOT_MUST_HAVE, "1° SLOT MUST HAVE (Rosa)", "🌸") + "\n" +
-             formatCategory(ob.BLU_OTTIMO_TITOLARE, "OTTIMI TITOLARI (Blu)", "🔵") + "\n" +
-             formatCategory(ob.GRIGIO_SCOMMESSINA, "SCOMMESSINE (Grigio)", "⚪");
-
-  await sendMessage(chatId, text, getRepartoKeyboard());
+  await sendMessage(chatId, lines.join("\n"), getRepartoKeyboard());
 }
 
 async function sendSaldiStatus(chatId) {
