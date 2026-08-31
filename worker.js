@@ -861,8 +861,9 @@ async function handlePlayerLookup(chatId, text, db) {
 
   const meKey = auctionState.teams["Noi"] ? "Noi" : (auctionState.teams["NOI"] ? "NOI" : Object.keys(auctionState.teams)[0]);
   const me = auctionState.teams[meKey] || { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
+  const myBudget = me.budget;
 
-  // Calcola i contendenti più probabili per questo giocatore
+  // 1. Analisi di tutti gli avversari per determinare i contendenti reali
   let interestedTeams = [];
   for (const [tName, tData] of Object.entries(auctionState.teams)) {
     if (tName === meKey) continue;
@@ -873,19 +874,38 @@ async function handlePlayerLookup(chatId, text, db) {
     
     const roleCount = tData.role_count[p.ruolo] || 0;
     const maxRole = (p.ruolo === "P" ? 3 : (p.ruolo === "D" || p.ruolo === "C" ? 8 : 6));
-    
-    if (roleCount < maxRole) {
+    const roleMissing = Math.max(0, maxRole - roleCount);
+
+    if (roleMissing > 0) {
+      // Calcola offerta massima reale
+      const otherMissing = Math.max(0, 3 - (tData.role_count.P || 0)) + 
+                           Math.max(0, 8 - (tData.role_count.D || 0)) + 
+                           Math.max(0, 8 - (tData.role_count.C || 0)) + 
+                           Math.max(0, (6 - (tData.role_count.A || 0)) - 1);
+      const maxBid = Math.max(1, tData.budget - otherMissing);
+
       interestedTeams.push({
         name: tName,
         budget: tData.budget,
+        maxBid: maxBid,
         hasTop: hasTopInRole,
-        score: tData.budget + (!hasTopInRole ? 150 : 0)
+        isRicherThanMe: (tData.budget > myBudget),
+        roleMissing: roleMissing
       });
     }
   }
 
-  interestedTeams.sort((a, b) => b.score - a.budget);
+  // Ordina per max offerta reale (dal più ricco/pericoloso al meno)
+  interestedTeams.sort((a, b) => {
+    // Prima chi NON ha il top, poi per budget decrescente
+    if (!a.hasTop && b.hasTop) return -1;
+    if (a.hasTop && !b.hasTop) return 1;
+    return b.maxBid - a.maxBid;
+  });
+
   const topContenders = interestedTeams.slice(0, 3);
+  const richestOpponentWithoutTop = interestedTeams.find(t => !t.hasTop) || interestedTeams[0];
+  const richerThanMeWithoutTop = interestedTeams.filter(t => !t.hasTop && t.isRicherThanMe);
 
   // Stima Prezzo Probabile d'Asta
   let estimatedMin = 1;
@@ -944,14 +964,27 @@ async function handlePlayerLookup(chatId, text, db) {
   // Sezione Tattica di Asta, Contendenti e Bluff
   let bluffAdvice = "";
   if (!auctionState.assigned[p.nome] && p.slot_10 <= 3) {
-    const primaryTarget = (topContenders[0] ? topContenders[0].name : "un avversario ricco");
-    const primaryBudget = (topContenders[0] ? topContenders[0].budget : 1000);
-    
+    let targetToDrain = "";
+    let reasonText = "";
+
+    if (richerThanMeWithoutTop.length > 0) {
+      // Ci sono avversari più ricchi di te senza top: sono loro il bersaglio prioritario da prosciugare!
+      const richest = richerThanMeWithoutTop[0];
+      targetToDrain = `<b>${richest.name} (${richest.budget} cr)</b>`;
+      reasonText = `Ha <b>più crediti di te (${richest.budget} vs ${myBudget})</b> ed è ancora a secco di Top. Fai salire l'asta su <b>${p.nome}</b> fino a ~${Math.floor(estimatedMin * 0.9)} cr per fargli spendere il suo tesoretto e superarlo nella classifica budget!`;
+    } else if (richestOpponentWithoutTop) {
+      // Sei tu il più ricco: il bersaglio è il tuo concorrente diretto più minaccioso subito sotto di te
+      targetToDrain = `<b>${richestOpponentWithoutTop.name} (${richestOpponentWithoutTop.budget} cr)</b>`;
+      reasonText = `È il concorrente più ricco alle tue spalle (max offerta: ${richestOpponentWithoutTop.maxBid} cr). Se non è ${p.nome} il tuo obiettivo primario, alzagli il prezzo per togliergli potere d'asta e prenderti il tuo vero colpo a prezzo di saldo!`;
+    }
+
     bluffAdvice = `\n\n🎯 <b>SIMULAZIONE & TATTICA D'ASTA:</b>` +
                   `\n💸 <b>A quanto potrebbe andare:</b> ~<b>${estimatedMin} - ${estimatedMax} crediti</b>` +
-                  `\n👥 <b>Chi lo potrebbe prendere:</b> ${topContenders.map(c => `<b>${c.name}</b> (${c.budget} cr ${c.hasTop ? "ha già top" : "senza top"})`).join(", ") || "Tutti"}` +
-                  `\n🃏 <b>TRAPPOLA / BLUFF STRATEGICO:</b>` +
-                  `\n<i>Se il tuo vero obiettivo è un altro, rilancia su <b>${p.nome}</b> fino a ~${Math.floor(estimatedMin * 0.9)} cr per far spendere e prosciugare <b>${primaryTarget} (${primaryBudget} cr)</b>. Così libererai il campo per il tuo vero colpo!</i>`;
+                  `\n👥 <b>Contendenti più affamati:</b>\n` +
+                  topContenders.map((c, i) => `  ${i+1}. <b>${c.name}</b> (${c.budget} cr | Max Offerta: <b>${c.maxBid} cr</b> ${c.hasTop ? '• <i>ha già top</i>' : '• ⚠️ <b>SENZA TOP</b>'})`).join("\n") +
+                  `\n\n🃏 <b>TRAPPOLA / BLUFF STRATEGICO:</b>` +
+                  `\n🎯 <b>Bersaglio da prosciugare:</b> ${targetToDrain}` +
+                  `\n💡 <b>Perché:</b> ${reasonText}`;
   }
 
   const out = `🎵 <b>${p.nome.toUpperCase()}</b> (${p.squadra} - <b>${p.ruolo}</b>)${badge}` +
