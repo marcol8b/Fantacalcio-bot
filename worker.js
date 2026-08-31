@@ -226,6 +226,12 @@ async function handleTelegramMessage(msg, env) {
   }
 
   // 6. BOTTONI RAPIDI DI REPARTO
+    if (lower === "/tattica" || lower === "tattica" || lower === "🧠 tattica consigliata" || lower === "consiglio") {
+    const advice = generateTacticalAdvice(db);
+    await sendMessage(chatId, advice, getRepartoKeyboard());
+    return;
+  }
+
   if (lower === "/att" || lower === "attaccanti" || lower === "⚽ attacco") {
     await sendAttaccoStatus(chatId, db);
     return;
@@ -381,6 +387,94 @@ function resetAuction() {
 }
 
 // -------------------------------------------------------------
+// 🧠 MOTORE DI TATTICA DINAMICA AVANZATA
+// -------------------------------------------------------------
+function generateTacticalAdvice(db) {
+  const meKey = auctionState.teams["Noi"] ? "Noi" : (auctionState.teams["NOI"] ? "NOI" : Object.keys(auctionState.teams)[0]);
+  const me = auctionState.teams[meKey] || { budget: 1000, players: [], role_count: { P: 0, D: 0, C: 0, A: 0 } };
+  const myBudget = me.budget;
+
+  // Analisi Attacco
+  const attAll = db.giocatori_per_reparto["ATTACCANTI"] || {};
+  const s1_att = (attAll["SLOT_1"] || []).filter(p => !auctionState.assigned[p.nome]);
+  const s2_att = (attAll["SLOT_2"] || []).filter(p => !auctionState.assigned[p.nome]);
+  const iHaveTopAtt = me.players.some(p => p.ruolo === "A" && p.prezzo >= 130);
+
+  // Analisi Centrocampo
+  const ccAll = db.giocatori_per_reparto["CENTROCAMPISTI"] || {};
+  const s1_cc = (ccAll["SLOT_1"] || []).filter(p => !auctionState.assigned[p.nome]);
+  const s2_cc = (ccAll["SLOT_2"] || []).filter(p => !auctionState.assigned[p.nome]);
+  const iHaveTopCc = me.players.some(p => p.ruolo === "C" && p.prezzo >= 70);
+
+  // Avversari senza top in attacco
+  let oppsNoTopAtt = [];
+  for (const [tName, tData] of Object.entries(auctionState.teams)) {
+    if (tName === meKey) continue;
+    const hasTop = tData.players.some(p => p.ruolo === "A" && p.prezzo >= 130);
+    if (!hasTop) {
+      oppsNoTopAtt.push({ name: tName, budget: tData.budget });
+    }
+  }
+  oppsNoTopAtt.sort((a, b) => b.budget - a.budget);
+
+  // Classifica generale budget
+  const allBudgets = Object.entries(auctionState.teams).map(([name, d]) => ({ name, budget: d.budget }));
+  allBudgets.sort((a, b) => b.budget - a.budget);
+  const myRank = allBudgets.findIndex(t => t.name === meKey) + 1;
+
+  let lines = [
+    `🧠 <b>TATTICA CONSIGLIATA & STRATEGIA D'ASTA</b>`,
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `💰 <b>Il tuo Potere d'Acquisto:</b> <b>${myBudget} cr</b> (Sei al <b>#${myRank}° posto</b> su 10 squadre)\n`
+  ];
+
+  // 1. Tattica Attacco
+  lines.push(`⚽ <b>STRATEGIA ATTACCO:</b>`);
+  if (iHaveTopAtt) {
+    const myTop = me.players.find(p => p.ruolo === "A" && p.prezzo >= 130);
+    lines.push(`• ✅ <b>Hai già il tuo 1° Slot (${myTop.nome} a ${myTop.prezzo} cr).</b>`);
+    lines.push(`• 💡 <b>Consiglio:</b> Non rilanciare su altri Slot 1 per non sprecare budget. Attendi che gli avversari si scannino e prendi un 2° slot conveniente (es. Kean, Scamacca o Raspadori) o completa centrocampo e difesa.\n`);
+  } else {
+    lines.push(`• ⚠️ <b>Sei ancora SENZA il 1° Slot d'attacco.</b>`);
+    lines.push(`• 🔴 <b>Slot 1 rimasti:</b> ${s1_att.length} (${s1_att.map(p => p.nome).join(", ") || "Finiti!"})`);
+    lines.push(`• 👥 <b>Avversari diretti in cerca di Top:</b> <b>${oppsNoTopAtt.length} squadre</b> (Budget max concorrenti: ${oppsNoTopAtt.slice(0, 3).map(o => `${o.name} ${o.budget}cr`).join(", ") || "Nessuno"}).`);
+
+    if (s1_att.length <= 2 && s1_att.length > 0 && oppsNoTopAtt.length >= 3) {
+      lines.push(`• 🚨 <b>ALLARME SCARSITÀ:</b> Restano solo ${s1_att.length} Super Top ma ci sono ben ${oppsNoTopAtt.length} squadre a cercarlo! L'asta su di loro andrà altissima: <b>o forzi subito ${s1_att[0].nome} oppure punta tutto su Slot 2 pesanti (Kean/Ramos/Hojlund) prima che salgano anche quelli!</b>\n`);
+    } else if (myBudget >= (oppsNoTopAtt[0] ? oppsNoTopAtt[0].budget : 0)) {
+      lines.push(`• 👑 <b>SEI IL PIÙ RICCO TRA CHI CERCA IL TOP!</b> Puoi decidere tu il ritmo dell'asta. Se esce ${s1_att[0] ? s1_att[0].nome : "un top"}, puoi rilanciare sicuro sapendo che nessun concorrente diretto può superarti.\n`);
+    } else {
+      lines.push(`• 💡 <b>Consiglio:</b> Ci sono avversari con più crediti (${oppsNoTopAtt[0] ? oppsNoTopAtt[0].name : ""}). Non entrare in aste folli oltre 350 cr: lascia sfogare i più ricchi e prendi il secondo top o Kean/Scamacca a prezzo di saldo.\n`);
+    }
+  }
+
+  // 2. Tattica Centrocampo
+  lines.push(`🎯 <b>STRATEGIA CENTROCAMPO:</b>`);
+  if (iHaveTopCc) {
+    lines.push(`• ✅ Hai già coperto un top di centrocampo. Concentrati su ottimi titolari a 10-20 cr.\n`);
+  } else {
+    lines.push(`• 🔴 <b>Top Centrocampo rimasti:</b> ${s1_cc.length} (${s1_cc.slice(0, 4).map(p => p.nome).join(", ") || "Finiti"}).`);
+    lines.push(`• 💡 <b>Consiglio:</b> I centrocampisti da bonus pesanti finiscono in fretta. Assicurati almeno uno tra <b>Pulisic, Zaccagni, Calhanoglu o Baturina</b> prima di rimanere con soli mediani.\n`);
+  }
+
+  // 3. Fabbisogno per ruoli mancanti
+  const missingP = Math.max(0, 3 - me.role_count.P);
+  const missingD = Math.max(0, 8 - me.role_count.D);
+  const missingC = Math.max(0, 8 - me.role_count.C);
+  const missingA = Math.max(0, 6 - me.role_count.A);
+  const totalMissing = missingP + missingD + missingC + missingA;
+
+  if (totalMissing > 0) {
+    const avgCrPerSlot = Math.floor(myBudget / totalMissing);
+    lines.push(`📊 <b>GESTIONE CREDITI:</b>`);
+    lines.push(`• Ti mancano <b>${totalMissing} giocatori</b> (P:${missingP}, D:${missingD}, C:${missingC}, A:${missingA}).`);
+    lines.push(`• Budget medio disponibile: <b>~${avgCrPerSlot} crediti per ogni slot rimanente</b>.`);
+  }
+
+  return lines.join("\n");
+}
+
+// -------------------------------------------------------------
 // VISTE E REPORT TATTICI
 // -------------------------------------------------------------
 async function sendAttaccoStatus(chatId, db) {
@@ -412,10 +506,12 @@ async function sendAttaccoStatus(chatId, db) {
   const myBudget = myTeam.budget;
 
   let advice = "";
-  if (myBudget >= (opponentBudgetsNoTop[0] || 0)) {
-    advice = `💡 <b>CONSIGLIO TATTICO:</b> Hai <b>${myBudget} cr</b> e sei il <b>più ricco</b> tra chi cerca il top! Puoi attendere il tuo preferito o forzare l'asta controllando il prezzo.`;
+  if (s1.length <= 2 && s1.length > 0 && opponentBudgetsNoTop.length >= 3) {
+    advice = `🚨 <b>ALLARME SCARSITÀ:</b> Restano solo <b>${s1.length} Super Top</b> per <b>${opponentBudgetsNoTop.length} avversari</b> senza top! Prezzi in salita: o forzi subito ${s1[0].nome} oppure punta dritto su Kean/Scamacca/Hojlund!`;
+  } else if (myBudget >= (opponentBudgetsNoTop[0] || 0)) {
+    advice = `👑 <b>SEI IL PIÙ RICCO (${myBudget} cr)!</b> Puoi dettare il prezzo del top sapendo che nessun concorrente diretto può superarti.`;
   } else {
-    advice = `💡 <b>CONSIGLIO TATTICO:</b> Ci sono ${opponentBudgetsNoTop.length} squadre a caccia del top (max crediti: ${opponentBudgetsNoTop.slice(0, 3).join(", ")} cr). Valuta i Tier 2 come Kean/Scamacca se i Tier 1 salgono troppo.`;
+    advice = `💡 <b>CONSIGLIO TATTICO:</b> Ci sono ${opponentBudgetsNoTop.length} squadre a caccia del top (max crediti: ${opponentBudgetsNoTop.slice(0, 3).join(", ")} cr). Non strapagare oltre 350 cr: sfrutta i 2° slot come Kean/Scamacca/Ramos!`;
   }
 
   let text = `⚽ <b>STATUS ATTACCO (Lega a 10)</b>\n` +
@@ -660,10 +756,11 @@ async function sendMainMenu(chatId) {
 function getRepartoKeyboard() {
   return {
     keyboard: [
+      [{ text: "🧠 Tattica Consigliata" }, { text: "⭐ I Miei Obiettivi" }],
       [{ text: "⚽ Attacco" }, { text: "🎯 Centrocampo" }],
       [{ text: "🛡️ Difesa" }, { text: "🧤 Portieri" }],
-      [{ text: "⭐ I Miei Obiettivi" }, { text: "💰 Saldi e Crediti" }],
-      [{ text: "📋 La Mia Rosa" }, { text: "🔄 Reset Asta" }]
+      [{ text: "💰 Saldi e Crediti" }, { text: "📋 La Mia Rosa" }],
+      [{ text: "🔄 Reset Asta" }]
     ],
     resize_keyboard: true,
     persistent: true
