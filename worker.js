@@ -71,6 +71,18 @@ export default {
     if (request.method === "POST") {
       try {
         const update = await request.json();
+        if (update.callback_query) {
+          const cb = update.callback_query;
+          const chatId = cb.message.chat.id;
+          const data = cb.data || "";
+          const db = await getDatabase();
+          if (data === "ob_P") await sendObiettiviStatus(chatId, db, "p");
+          else if (data === "ob_D") await sendObiettiviStatus(chatId, db, "d");
+          else if (data === "ob_C") await sendObiettiviStatus(chatId, db, "c");
+          else if (data === "ob_A") await sendObiettiviStatus(chatId, db, "a");
+          else if (data === "ob_ALL") await sendObiettiviStatus(chatId, db, null);
+          return new Response("OK", { status: 200 });
+        }
         if (update.message) {
           await handleTelegramMessage(update.message, env);
         }
@@ -264,8 +276,10 @@ async function handleTelegramMessage(msg, env) {
     return;
   }
 
-  if (lower === "/obiettivi" || lower === "obiettivi" || lower === "⭐ i miei obiettivi") {
-    await sendObiettiviStatus(chatId, db);
+  if (lower.startsWith("/obiettivi") || lower.startsWith("obiettivi") || lower === "⭐ i miei obiettivi") {
+    let cleanParam = text.replace(/^\/?obiettivi(@[a-zA-Z0-9_]+)?/i, "").trim();
+    if (lower === "⭐ i miei obiettivi") cleanParam = "";
+    await sendObiettiviStatus(chatId, db, cleanParam || null);
     return;
   }
 
@@ -946,16 +960,15 @@ async function sendPortieriStatus(chatId, db) {
   await sendMessage(chatId, text, getRepartoKeyboard());
 }
 
-async function sendObiettiviStatus(chatId, db) {
+async function sendObiettiviStatus(chatId, db, roleFilter = null) {
   const ob = db.obiettivi || {};
   const meKey = auctionState.teams["Noi"] ? "Noi" : (auctionState.teams["NOI"] ? "NOI" : Object.keys(auctionState.teams)[0]);
 
-  // Creiamo una struttura per RUOLO -> CATEGORIA
   const roleMap = {
-    "P": { name: "PORTIERI", icon: "🧤" },
-    "D": { name: "DIFENSORI", icon: "🛡️" },
-    "C": { name: "CENTROCAMPISTI", icon: "🎯" },
-    "A": { name: "ATTACCANTI", icon: "⚽" }
+    "P": { name: "PORTIERI", icon: "🧤", keys: ["p", "por", "portieri", "portiere"] },
+    "D": { name: "DIFENSORI", icon: "🛡️", keys: ["d", "dif", "difensori", "difensore", "difesa"] },
+    "C": { name: "CENTROCAMPISTI", icon: "🎯", keys: ["c", "cc", "centrocampisti", "centrocampista", "centrocampo"] },
+    "A": { name: "ATTACCANTI", icon: "⚽", keys: ["a", "att", "attaccanti", "attaccante", "attacco"] }
   };
 
   const categories = [
@@ -965,9 +978,8 @@ async function sendObiettiviStatus(chatId, db) {
     { key: "GRIGIO_SCOMMESSINA", label: "SCOMMESSINE", icon: "⚪" }
   ];
 
-  // Raccogliamo tutti i giocatori obiettivo divisi per Ruolo e poi per Categoria
+  // Raccogliamo i dati per Ruolo e Categoria
   const dataByRole = { P: {}, D: {}, C: {}, A: {} };
-  
   categories.forEach(cat => {
     const list = ob[cat.key] || [];
     list.forEach(p => {
@@ -977,12 +989,30 @@ async function sendObiettiviStatus(chatId, db) {
     });
   });
 
-  let lines = [
-    `⭐ <b>I TUOI OBIETTIVI DIVISI PER REPARTO</b>`,
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`
-  ];
+  // Se è stato specificato un filtro ruolo
+  let activeRoles = Object.keys(roleMap);
+  if (roleFilter) {
+    const cleanFilter = roleFilter.toLowerCase().trim();
+    const matchedRole = Object.keys(roleMap).find(r => roleMap[r].keys.includes(cleanFilter));
+    if (matchedRole) {
+      activeRoles = [matchedRole];
+    }
+  }
 
-  for (const [rCode, rInfo] of Object.entries(roleMap)) {
+  let lines = [];
+  if (activeRoles.length === 1) {
+    const rCode = activeRoles[0];
+    const rInfo = roleMap[rCode];
+    lines.push(`⭐ <b>I TUOI OBIETTIVI: ${rInfo.icon} ${rInfo.name}</b>`);
+    lines.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
+  } else {
+    lines.push(`⭐ <b>I TUOI OBIETTIVI (TUTTI I REPARTI)</b>`);
+    lines.push(`💡 <i>Filtra per reparto: <code>/obiettivi att</code>, <code>/obiettivi cc</code>, <code>/obiettivi dif</code>, <code>/obiettivi por</code></i>`);
+    lines.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
+  }
+
+  for (const rCode of activeRoles) {
+    const rInfo = roleMap[rCode];
     let roleBlock = [];
     let freeTotal = 0;
     let myTotal = 0;
@@ -1017,7 +1047,23 @@ async function sendObiettiviStatus(chatId, db) {
     }
   }
 
-  await sendMessage(chatId, lines.join("\n"), getRepartoKeyboard());
+  const inlineKeyboard = {
+    inline_keyboard: [
+      [
+        { text: "🧤 Portieri", callback_data: "ob_P" },
+        { text: "🛡️ Difensori", callback_data: "ob_D" }
+      ],
+      [
+        { text: "🎯 Centrocampisti", callback_data: "ob_C" },
+        { text: "⚽ Attaccanti", callback_data: "ob_A" }
+      ],
+      [
+        { text: "⭐ Mostra Tutti", callback_data: "ob_ALL" }
+      ]
+    ]
+  };
+
+  await sendMessage(chatId, lines.join("\n"), inlineKeyboard);
 }
 
 async function sendSaldiStatus(chatId) {
