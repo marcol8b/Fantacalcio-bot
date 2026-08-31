@@ -195,6 +195,72 @@ async function handleTelegramMessage(msg, env) {
     return;
   }
 
+    // CONSULTA SQUADRA SPECIFICA: /squadra [NomeSquadra] oppure /rosa [NomeSquadra]
+  if (lower.startsWith("/squadra") || (lower.startsWith("/rosa ") || (lower.startsWith("rosa ") && lower !== "rosa"))) {
+    let qTeam = "";
+    if (lower.startsWith("/squadra")) {
+      qTeam = text.replace(/^\/?squadra(@[a-zA-Z0-9_]+)?/i, "").trim();
+    } else {
+      qTeam = text.replace(/^\/?rosa(@[a-zA-Z0-9_]+)?/i, "").trim();
+    }
+
+    if (!qTeam) {
+      // Mostra lista delle squadre consultabili
+      const listButtons = Object.keys(auctionState.teams).map(t => [{ text: `📋 Rosa ${t}`, callback_data: `squadra_${t}` }]);
+      let msg = "👥 <b>DI QUALE SQUADRA VUOI VEDERE LA ROSA?</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+      Object.keys(auctionState.teams).forEach((t, i) => {
+        msg += `${i + 1}. <code>/squadra ${t}</code> (${auctionState.teams[t].budget} cr - ${auctionState.teams[t].players.length} giocatori)\n`;
+      });
+      await sendMessage(chatId, msg, getRepartoKeyboard());
+      return;
+    }
+
+    // Match case-insensitive squadra
+    const targetKey = Object.keys(auctionState.teams).find(k => k.toLowerCase() === qTeam.toLowerCase() || k.toLowerCase().includes(qTeam.toLowerCase()));
+    if (!targetKey) {
+      await sendMessage(chatId, `❌ Squadra "<b>${qTeam}</b>" non trovata.\nSquadre disponibili:\n` + Object.keys(auctionState.teams).map(t => `• <code>${t}</code>`).join("\n"));
+      return;
+    }
+
+    const tData = auctionState.teams[targetKey];
+    let lines = [
+      `📋 <b>ROSA: ${targetKey.toUpperCase()}</b>`,
+      `💰 <b>Crediti rimasti:</b> ${tData.budget} / 1000`,
+      `📦 <b>Giocatori acquistati (${tData.players.length}):</b> P: ${tData.role_count.P}/3 | D: ${tData.role_count.D}/8 | C: ${tData.role_count.C}/8 | A: ${tData.role_count.A}/6\n`
+    ];
+
+    if (tData.players.length === 0) {
+      lines.push("<i>Nessun giocatore acquistato finora.</i>");
+    } else {
+      // Raggruppa per ruolo P, D, C, A
+      const byRole = { P: [], D: [], C: [], A: [] };
+      tData.players.forEach(p => {
+        if (byRole[p.ruolo]) byRole[p.ruolo].push(p);
+        else byRole["A"].push(p);
+      });
+
+      if (byRole.P.length > 0) {
+        lines.push("🧤 <b>PORTIERI:</b>");
+        byRole.P.forEach(p => lines.push(`  • ${p.nome} (<b>${p.prezzo} cr</b>)`));
+      }
+      if (byRole.D.length > 0) {
+        lines.push("🛡️ <b>DIFENSORI:</b>");
+        byRole.D.forEach(p => lines.push(`  • ${p.nome} (<b>${p.prezzo} cr</b>)`));
+      }
+      if (byRole.C.length > 0) {
+        lines.push("🎯 <b>CENTROCAMPISTI:</b>");
+        byRole.C.forEach(p => lines.push(`  • ${p.nome} (<b>${p.prezzo} cr</b>)`));
+      }
+      if (byRole.A.length > 0) {
+        lines.push("⚽ <b>ATTACCANTI:</b>");
+        byRole.A.forEach(p => lines.push(`  • ${p.nome} (<b>${p.prezzo} cr</b>)`));
+      }
+    }
+
+    await sendMessage(chatId, lines.join("\n"), getRepartoKeyboard());
+    return;
+  }
+
   // ASSEGNAZIONI: "mio <giocatore> <prezzo>"
   if (lower.startsWith("mio ")) {
     const parts = text.substring(4).trim().split(" ");
