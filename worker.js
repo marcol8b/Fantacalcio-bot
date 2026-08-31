@@ -753,46 +753,58 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     // Modal & Assign Flow
-    function openPlayerModal(playerName) {
+        function openPlayerModal(playerName) {
       selectedPlayer = appState.allPlayers.find(p => p.nome.toLowerCase() === playerName.toLowerCase());
       if (!selectedPlayer) return;
 
       const isTaken = appState.assigned[selectedPlayer.nome];
-      document.getElementById('modalPlayerHeader').innerHTML = \`
-        <div class="flex justify-between items-start">
-          <div>
-            <h3 class="text-lg font-bold text-white">\${selectedPlayer.nome}</h3>
-            <p class="text-xs text-gray-400">\${selectedPlayer.squadra} • \${selectedPlayer.ruolo} • Slot \${selectedPlayer.slot_10} (IA: \${selectedPlayer.ia_ordinamento})</p>
-          </div>
-          \${isTaken ? \`<span class="text-xs bg-red-500/20 text-red-400 px-2.5 py-1 rounded-lg font-bold">Assegnato a \${isTaken.team} (\${isTaken.price}cr)</span>\` : \`<span class="text-xs bg-emerald-500/20 text-emerald-400 px-2.5 py-1 rounded-lg font-bold">🟢 LIBERO</span>\`}
-        </div>
-        \${selectedPlayer.nota ? \`<p class="text-xs text-gray-300 italic mt-2 bg-dark-900 p-2 rounded-lg border border-dark-700">📝 \${selectedPlayer.nota}</p>\` : ''}
-      \`;
+      let badgeHtml = '';
+      if (selectedPlayer.tag_obiettivo === 'GIALLO_MUST_HAVE') badgeHtml = '<span class="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded font-bold border border-amber-500/30">🟡 MUST HAVE</span>';
+      if (selectedPlayer.tag_obiettivo === 'ROSA_PRIMO_SLOT_MUST_HAVE') badgeHtml = '<span class="text-xs bg-pink-500/20 text-pink-400 px-2 py-0.5 rounded font-bold border border-pink-500/30">🌸 1° SLOT MUST HAVE</span>';
+      if (selectedPlayer.tag_obiettivo === 'BLU_OTTIMO_TITOLARE') badgeHtml = '<span class="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded font-bold border border-blue-500/30">🔵 OTTIMO TITOLARE</span>';
+      if (selectedPlayer.tag_obiettivo === 'GRIGIO_SCOMMESSINA') badgeHtml = '<span class="text-xs bg-gray-500/20 text-gray-300 px-2 py-0.5 rounded font-bold border border-gray-500/30">⚪ SCOMMESSINA</span>';
 
-      // Set suggested price
+      document.getElementById('modalPlayerHeader').innerHTML = `
+        <div class="flex justify-between items-start gap-2">
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 class="text-xl font-black text-white">\${selectedPlayer.nome.toUpperCase()}</h3>
+              \${badgeHtml}
+            </div>
+            <p class="text-xs text-gray-400 mt-1">
+              \${selectedPlayer.squadra} • Ruolo: <b class="text-cyan-400">\${selectedPlayer.ruolo}</b> • 
+              Slot 10: <b class="text-amber-400">SLOT \${selectedPlayer.slot_10}</b> (IA: \${selectedPlayer.ia_ordinamento}) • 
+              Titolarità: <b class="text-emerald-400">\${selectedPlayer.titolarita}/5</b>
+            </p>
+          </div>
+          \${isTaken ? `<span class="text-xs bg-red-500/20 text-red-400 px-3 py-1 rounded-xl font-extrabold shrink-0 border border-red-500/30">Assegnato a \${isTaken.team} (\${isTaken.price}cr)</span>` : `<span class="text-xs bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-xl font-extrabold shrink-0 border border-emerald-500/30">🟢 LIBERO</span>`}
+        </div>
+        \${selectedPlayer.budget_target ? `<div class="text-xs text-emerald-400 font-bold mt-1.5 bg-emerald-950/30 px-2.5 py-1 rounded-lg border border-emerald-500/20">🎯 Tuo Budget Target da Excel: <b>\${selectedPlayer.budget_target} cr</b></div>` : ''}
+        \${selectedPlayer.nota ? `<p class="text-xs text-gray-300 italic mt-2 bg-dark-900 p-2.5 rounded-xl border border-dark-700">📝 <b>Nota Tattica:</b> \${selectedPlayer.nota}</p>` : ''}
+      `;
+
+      // Prezzo suggerito
       document.getElementById('assignPriceInput').value = selectedPlayer.budget_target || (selectedPlayer.slot_10 === 1 ? 250 : (selectedPlayer.slot_10 === 2 ? 140 : 20));
 
-      // Insights & Bluff
-      document.getElementById('modalTacticalInsights').innerHTML = \`
-        <div class="font-semibold text-emerald-400 flex items-center gap-1.5"><i class="fa-solid fa-chart-line"></i> Intelligence Tattica:</div>
-        <p class="text-gray-300">Stima d'asta realistica: <b>\${selectedPlayer.slot_10 === 1 ? '280-380' : '140-230'} cr</b>.</p>
-        <p class="text-gray-400">💡 <i>Usa i tasti rapidi qui sotto per assegnare in 1 click a Noi o a un avversario.</i></p>
-      \`;
+      // Inseriamo il Dossier Tattico Completo e il Box Bluff
+      document.getElementById('modalTacticalInsights').innerHTML = getPlayerTacticalDossier(selectedPlayer);
 
-      // Team Buttons
+      // Bottoni Squadre per l'assegnazione
       const teamBtnContainer = document.getElementById('modalTeamButtons');
       const teams = Object.keys(appState.teams);
-      teamBtnContainer.innerHTML = teams.map(tName => \`
-        <button onclick="selectTeamForAssign('\${tName}')" id="btnTeam_\${tName}" class="team-assign-btn text-xs py-1.5 px-2 rounded-lg border border-dark-600 bg-dark-800 hover:bg-dark-700 text-gray-200 truncate \${tName==='Noi'?'border-emerald-500 text-emerald-400 font-bold':''}">
+      teamBtnContainer.innerHTML = teams.map(tName => `
+        <button onclick="selectTeamForAssign('\${tName}')" id="btnTeam_\${tName}" class="team-assign-btn text-xs py-1.5 px-2 rounded-lg border border-dark-600 bg-dark-800 hover:bg-dark-700 text-gray-200 truncate \${tName==='Noi'||tName==='NOI'?'bg-emerald-600 text-white border-emerald-400 font-bold':''}">
           \${tName}
         </button>
-      \`).join('');
+      `).join('');
 
-      selectedTeamToAssign = "Noi";
+      selectedTeamToAssign = (appState.teams["Noi"] ? "Noi" : (appState.teams["NOI"] ? "NOI" : Object.keys(appState.teams)[0]));
+      
+      const formSec = document.querySelector('#assignModal .space-y-3.pt-2');
+      if (formSec) formSec.classList.remove('hidden');
       document.getElementById('assignModal').classList.remove('hidden');
     }
 
-    let selectedTeamToAssign = "Noi";
     function selectTeamForAssign(tName) {
       selectedTeamToAssign = tName;
       document.querySelectorAll('.team-assign-btn').forEach(b => {
